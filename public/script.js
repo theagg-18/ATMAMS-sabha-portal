@@ -16,7 +16,13 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const functions = getFunctions(app); // Initialize Cloud Functions
+
+// =================================================================
+// THIS IS THE CRITICAL FIX:
+// Explicitly tell the app to use the 'asia-south1' region for functions.
+// =================================================================
+const functions = getFunctions(app, "asia-south1"); 
+
 
 const loadingScreen = document.getElementById('loading-screen');
 // ... (all other element selections are the same)
@@ -446,3 +452,4 @@ currentAddressTextarea.addEventListener('input', () => {
         permanentAddressTextarea.value = currentAddressTextarea.value;
     }
 });
+

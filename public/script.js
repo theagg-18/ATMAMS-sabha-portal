@@ -9,35 +9,34 @@ const firebaseConfig = {
 };
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser, sendPasswordResetEmail, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, doc, getDoc, collection, query, where, getDocs, runTransaction, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-
-// =================================================================
-// THIS IS THE CRITICAL FIX:
-// Explicitly tell the app to use the 'asia-south1' region for functions.
-// =================================================================
 const functions = getFunctions(app, "asia-south1"); 
 
-
+// --- UI Element References ---
 const loadingScreen = document.getElementById('loading-screen');
-// ... (all other element selections are the same)
 const authScreen = document.getElementById('auth-screen');
 const appScreen = document.getElementById('app-screen');
+
+// Login and Reset Password
+const authTabs = document.getElementById('auth-tabs');
 const loginForm = document.getElementById('login-form');
+const forgotPasswordForm = document.getElementById('forgot-password-form');
+const forgotPasswordLink = document.getElementById('forgot-password-link');
+const backToLoginBtn = document.getElementById('back-to-login-btn');
+
+// Change Password
+const changePasswordForm = document.getElementById('change-password-form');
+
+// Registration
 const registerContainer = document.getElementById('register-container');
 const showLoginBtn = document.getElementById('show-login-btn');
 const showRegisterBtn = document.getElementById('show-register-btn');
-const messageModal = document.getElementById('message-modal');
-const modalMessage = document.getElementById('modal-message');
-const modalCloseBtn = document.getElementById('modal-close-btn');
-const successIdList = document.getElementById('success-id-list');
-const btnProceedDashboard = document.getElementById('btn-proceed-dashboard');
-
 const steps = document.querySelectorAll('.form-step');
 const btnHasId = document.getElementById('btn-has-id');
 const btnNoId = document.getElementById('btn-no-id');
@@ -47,6 +46,12 @@ const findIdForm = document.getElementById('find-id-form');
 const createLoginForm = document.getElementById('create-login-form');
 const registerForm = document.getElementById('register-form');
 
+// Success and Dashboard
+const successIdList = document.getElementById('success-id-list');
+const btnProceedDashboard = document.getElementById('btn-proceed-dashboard');
+const messageModal = document.getElementById('message-modal');
+const modalMessage = document.getElementById('modal-message');
+const modalCloseBtn = document.getElementById('modal-close-btn');
 
 const showMessage = (message) => { modalMessage.textContent = message; messageModal.classList.remove('hidden'); };
 modalCloseBtn.addEventListener('click', () => messageModal.classList.add('hidden'));
@@ -55,6 +60,81 @@ const goToStep = (stepId) => {
     steps.forEach(step => step.classList.remove('active'));
     document.getElementById(stepId).classList.add('active');
 };
+
+// --- NEW EVENT LISTENERS FOR PASSWORD MANAGEMENT ---
+
+forgotPasswordLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    loginForm.classList.add('hidden');
+    registerContainer.classList.add('hidden');
+    forgotPasswordForm.classList.remove('hidden');
+    authTabs.classList.add('hidden');
+});
+
+backToLoginBtn.addEventListener('click', () => {
+    forgotPasswordForm.classList.add('hidden');
+    loginForm.classList.remove('hidden');
+    authTabs.classList.remove('hidden');
+});
+
+forgotPasswordForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('reset-email').value;
+    loadingScreen.classList.remove('hidden');
+    try {
+        await sendPasswordResetEmail(auth, email);
+        showMessage("Password reset link sent! Please check your email inbox (and spam folder).");
+        backToLoginBtn.click();
+    } catch (error) {
+        console.error("Password reset failed:", error);
+        showMessage(`Error: ${error.message}`);
+    } finally {
+        loadingScreen.classList.add('hidden');
+    }
+});
+
+changePasswordForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const currentPassword = document.getElementById('current-password').value;
+    const newPassword = document.getElementById('new-password').value;
+    const retypeNewPassword = document.getElementById('retype-new-password').value;
+
+    if (newPassword !== retypeNewPassword) {
+        showMessage("New passwords do not match.");
+        return;
+    }
+    
+    const user = auth.currentUser;
+    if (!user) {
+        showMessage("No user is currently logged in.");
+        return;
+    }
+
+    loadingScreen.classList.remove('hidden');
+    try {
+        const credential = EmailAuthProvider.credential(user.email, currentPassword);
+        // Re-authenticate the user to confirm their identity
+        await reauthenticateWithCredential(user, credential);
+        // If re-authentication is successful, update the password
+        await updatePassword(user, newPassword);
+        showMessage("Password updated successfully!");
+        changePasswordForm.reset(); // Clear the form fields
+    } catch (error) {
+        console.error("Password change failed:", error);
+        let friendlyMessage = "Failed to change password.";
+        if (error.code === 'auth/wrong-password') {
+            friendlyMessage = "The current password you entered is incorrect.";
+        } else if (error.code === 'auth/weak-password') {
+            friendlyMessage = "Your new password is too weak. It must be at least 6 characters long.";
+        }
+        showMessage(friendlyMessage);
+    } finally {
+        loadingScreen.classList.add('hidden');
+    }
+});
+
+
+// --- EXISTING EVENT LISTENERS AND FUNCTIONS ---
 
 btnHasId.addEventListener('click', () => goToStep('step-verify-with-id'));
 btnNoId.addEventListener('click', () => goToStep('step-find-id'));
@@ -176,8 +256,7 @@ findIdForm.addEventListener('submit', async (e) => {
 });
 
 
-// --- The rest of the script.js file is unchanged ---
-// (registerForm, displayDashboard, etc.)
+// ... Rest of the functions (registerForm, displayDashboard, etc.) are unchanged ...
 registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (registerForm['register-password'].value !== registerForm['register-retype-password'].value) { showMessage("Passwords do not match."); return; }
@@ -419,8 +498,23 @@ const addSpouseToggle = document.getElementById('add-spouse-toggle'); addSpouseT
 const addFatherToggle = document.getElementById('add-father-toggle'); addFatherToggle.addEventListener('change', () => { const c = document.getElementById('father-details'); if (addFatherToggle.checked) { c.classList.remove('hidden'); c.innerHTML = createAdultMemberFields('father'); } else { c.classList.add('hidden'); c.innerHTML = ''; } });
 const addMotherToggle = document.getElementById('add-mother-toggle'); addMotherToggle.addEventListener('change', () => { const c = document.getElementById('mother-details'); if (addMotherToggle.checked) { c.classList.remove('hidden'); c.innerHTML = createAdultMemberFields('mother'); } else { c.classList.add('hidden'); c.innerHTML = ''; } });
 
-showLoginBtn.addEventListener('click', () => { loginForm.style.display = 'block'; registerContainer.style.display = 'none'; showLoginBtn.classList.add('border-blue-600', 'text-blue-600'); showRegisterBtn.classList.remove('border-blue-600', 'text-blue-600'); });
-showRegisterBtn.addEventListener('click', () => { loginForm.style.display = 'none'; registerContainer.style.display = 'block'; goToStep('step-initial-question'); showRegisterBtn.classList.add('border-blue-600', 'text-blue-600'); showLoginBtn.classList.remove('border-blue-600', 'text-blue-600'); });
+showLoginBtn.addEventListener('click', () => { 
+    loginForm.style.display = 'block'; 
+    registerContainer.style.display = 'none'; 
+    forgotPasswordForm.classList.add('hidden');
+    authTabs.classList.remove('hidden');
+    showLoginBtn.classList.add('border-blue-600', 'text-blue-600'); 
+    showRegisterBtn.classList.remove('border-blue-600', 'text-blue-600'); 
+});
+showRegisterBtn.addEventListener('click', () => { 
+    loginForm.style.display = 'none'; 
+    registerContainer.style.display = 'block'; 
+    forgotPasswordForm.classList.add('hidden');
+    authTabs.classList.remove('hidden');
+    goToStep('step-initial-question'); 
+    showRegisterBtn.classList.add('border-blue-600', 'text-blue-600'); 
+    showLoginBtn.classList.remove('border-blue-600', 'text-blue-600'); 
+});
 
 createLoginForm.addEventListener('submit', async (e) => { e.preventDefault(); if (createLoginForm['create-password'].value !== createLoginForm['create-retype-password'].value) { showMessage("Passwords do not match."); return; } loadingScreen.classList.remove('hidden'); const email = createLoginForm['create-email'].value; const phone = createLoginForm['create-phone'].value; const password = createLoginForm['create-password'].value; const docId = createLoginForm['member-doc-id'].value; try { const userCredential = await createUserWithEmailAndPassword(auth, email, password); const user = userCredential.user; await updateDoc(doc(db, "members", docId), { authUid: user.uid, email: email, phone: phone }); showMessage("Account created! You are now logged in."); btnProceedDashboard.click(); } catch (error) { showMessage(`Account creation failed: ${error.message}`); } finally { loadingScreen.classList.add('hidden'); } });
 
@@ -452,4 +546,3 @@ currentAddressTextarea.addEventListener('input', () => {
         permanentAddressTextarea.value = currentAddressTextarea.value;
     }
 });
-

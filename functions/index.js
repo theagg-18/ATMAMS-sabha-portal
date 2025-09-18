@@ -1,6 +1,10 @@
-const { onCall } = require("firebase-functions/v2/https");
-const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const {onCall} = require("firebase-functions/v2/https");
+const {initializeApp} = require("firebase-admin/app");
+const {getFirestore} = require("firebase-admin/firestore");
+
+// NEW: Set the region for all functions in this file
+const {setGlobalOptions} = require("firebase-functions/v2/options");
+setGlobalOptions({region: "asia-south1"});
 
 // Initialize the Firebase Admin SDK
 initializeApp();
@@ -10,11 +14,11 @@ initializeApp();
  * This function is callable from the client-side application.
  */
 exports.verifyMemberById = onCall(async (request) => {
-  const { sabhaId, aadhaar } = request.data;
+  const {sabhaId, aadhaar} = request.data;
 
   // Basic validation on the input
   if (!sabhaId || !aadhaar || aadhaar.length !== 12) {
-    return { success: false, message: "Invalid input provided." };
+    return {success: false, message: "Invalid input provided."};
   }
 
   const db = getFirestore();
@@ -22,13 +26,16 @@ exports.verifyMemberById = onCall(async (request) => {
 
   // Query the database to find a matching member
   const snapshot = await membersRef
-    .where("sabhaId", "==", sabhaId)
-    .where("aadhaar", "==", aadhaar)
-    .limit(1)
-    .get();
+      .where("sabhaId", "==", sabhaId)
+      .where("aadhaar", "==", aadhaar)
+      .limit(1)
+      .get();
 
   if (snapshot.empty) {
-    return { success: false, message: "Details not found. Please check your Sabha ID and Aadhaar number." };
+    return {
+      success: false,
+      message: "Details not found. Please check your Sabha ID and Aadhaar.",
+    };
   }
 
   const memberDoc = snapshot.docs[0];
@@ -36,7 +43,10 @@ exports.verifyMemberById = onCall(async (request) => {
 
   // Check if the member already has an online account
   if (memberData.authUid) {
-    return { success: false, message: "An online account already exists for this member. Please use the Login page." };
+    return {
+      success: false,
+      message: "An online account already exists. Please use the Login page.",
+    };
   }
 
   // Return success with the necessary (non-sensitive) data
@@ -52,39 +62,45 @@ exports.verifyMemberById = onCall(async (request) => {
  * This function is callable from the client-side application.
  */
 exports.findMemberByName = onCall(async (request) => {
-    const { fullName, aadhaar, dob } = request.data;
+  const {fullName, aadhaar, dob} = request.data;
 
-    // Basic validation on the input
-    if (!fullName || !aadhaar || !dob || aadhaar.length !== 12) {
-        return { success: false, message: "Invalid input provided." };
-    }
+  // Basic validation on the input
+  if (!fullName || !aadhaar || !dob || aadhaar.length !== 12) {
+    return {success: false, message: "Invalid input provided."};
+  }
 
-    const db = getFirestore();
-    const membersRef = db.collection("members");
+  const db = getFirestore();
+  const membersRef = db.collection("members");
 
-    // Query the database
-    const snapshot = await membersRef
-        .where("fullName", "==", fullName)
-        .where("aadhaar", "==", aadhaar)
-        .where("dob", "==", dob)
-        .limit(1)
-        .get();
+  // Query the database
+  const snapshot = await membersRef
+      .where("fullName", "==", fullName)
+      .where("aadhaar", "==", aadhaar)
+      .where("dob", "==", dob)
+      .limit(1)
+      .get();
 
-    if (snapshot.empty) {
-        return { success: false, message: "No profile found with those details." };
-    }
-
-    const memberDoc = snapshot.docs[0];
-    const memberData = memberDoc.data();
-
-    if (memberData.authUid) {
-        return { success: false, message: "An online account already exists for this member. Please use the Login page." };
-    }
-
+  if (snapshot.empty) {
     return {
-        success: true,
-        fullName: memberData.fullName,
-        sabhaId: memberData.sabhaId,
-        docId: memberDoc.id,
+      success: false,
+      message: "No profile found with those details.",
     };
+  }
+
+  const memberDoc = snapshot.docs[0];
+  const memberData = memberDoc.data();
+
+  if (memberData.authUid) {
+    return {
+      success: false,
+      message: "An online account already exists. Please use the Login page.",
+    };
+  }
+
+  return {
+    success: true,
+    fullName: memberData.fullName,
+    sabhaId: memberData.sabhaId,
+    docId: memberDoc.id,
+  };
 });

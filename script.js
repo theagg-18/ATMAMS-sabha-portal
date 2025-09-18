@@ -11,12 +11,15 @@ const firebaseConfig = {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, doc, getDoc, collection, query, where, getDocs, runTransaction, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const functions = getFunctions(app); // Initialize Cloud Functions
 
 const loadingScreen = document.getElementById('loading-screen');
+// ... (all other element selections are the same)
 const authScreen = document.getElementById('auth-screen');
 const appScreen = document.getElementById('app-screen');
 const loginForm = document.getElementById('login-form');
@@ -37,6 +40,7 @@ const verifyIdForm = document.getElementById('verify-id-form');
 const findIdForm = document.getElementById('find-id-form');
 const createLoginForm = document.getElementById('create-login-form');
 const registerForm = document.getElementById('register-form');
+
 
 const showMessage = (message) => { modalMessage.textContent = message; messageModal.classList.remove('hidden'); };
 modalCloseBtn.addEventListener('click', () => messageModal.classList.add('hidden'));
@@ -113,27 +117,22 @@ verifyIdForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     loadingScreen.classList.remove('hidden');
     try {
-        const sabhaId = document.getElementById('verify-sabha-id').value.trim();
-        const aadhaar = document.getElementById('verify-aadhaar').value;
-        const q = query(collection(db, "members"), where("sabhaId", "==", sabhaId), where("aadhaar", "==", aadhaar));
-        const querySnapshot = await getDocs(q);
-        
-        if (querySnapshot.empty) {
-            showMessage("Details not found. Please check your Sabha ID and Aadhaar number.");
-        } else {
-            const memberDoc = querySnapshot.docs[0];
-            const memberData = memberDoc.data();
-            if (memberData.authUid) {
-                showMessage("An online account already exists for this member. Please use the Login page.");
-                return;
-            }
-            document.getElementById('verified-member-name').textContent = memberData.fullName;
-            document.getElementById('member-doc-id').value = memberDoc.id;
+        const verifyMemberById = httpsCallable(functions, 'verifyMemberById');
+        const result = await verifyMemberById({ 
+            sabhaId: document.getElementById('verify-sabha-id').value.trim(),
+            aadhaar: document.getElementById('verify-aadhaar').value
+        });
+
+        if (result.data.success) {
+            document.getElementById('verified-member-name').textContent = result.data.fullName;
+            document.getElementById('member-doc-id').value = result.data.docId;
             goToStep('step-create-login');
+        } else {
+            showMessage(result.data.message);
         }
     } catch (error) {
-        console.error("Verification failed:", error);
-        showMessage("An error occurred during verification. This is likely due to a missing database index. Please check the browser console for a link to create it, or contact the administrator.");
+        console.error("Verification function failed:", error);
+        showMessage("An error occurred during verification. Please try again later.");
     } finally {
         loadingScreen.classList.add('hidden');
     }
@@ -143,35 +142,36 @@ findIdForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     loadingScreen.classList.remove('hidden');
     try {
-        const fullName = document.getElementById('find-fullName').value.trim();
-        const aadhaar = document.getElementById('find-aadhaar').value;
-        const dob = document.getElementById('find-dob').value;
-        const q = query(collection(db, "members"), where("fullName", "==", fullName), where("aadhaar", "==", aadhaar), where("dob", "==", dob));
-        const querySnapshot = await getDocs(q);
+        const findMemberByName = httpsCallable(functions, 'findMemberByName');
+        const result = await findMemberByName({
+            fullName: document.getElementById('find-fullName').value.trim(),
+            aadhaar: document.getElementById('find-aadhaar').value,
+            dob: document.getElementById('find-dob').value
+        });
         
-        if (querySnapshot.empty) {
-            showMessage("No profile found with those details. Please proceed with a new registration.");
-            goToStep('step-full-registration');
-        } else {
-            const memberDoc = querySnapshot.docs[0];
-            const memberData = memberDoc.data();
-            if (memberData.authUid) {
-                showMessage("An online account already exists for this member. Please use the Login page.");
-                return;
-            }
-            document.getElementById('verified-member-name').textContent = `${memberData.fullName} (ID: ${memberData.sabhaId})`;
-            document.getElementById('member-doc-id').value = memberDoc.id;
+        if (result.data.success) {
+            document.getElementById('verified-member-name').textContent = `${result.data.fullName} (ID: ${result.data.sabhaId})`;
+            document.getElementById('member-doc-id').value = result.data.docId;
             goToStep('step-create-login');
+        } else {
+            if (result.data.message === "No profile found with those details.") {
+                showMessage(result.data.message + " Please proceed with a new registration.");
+                goToStep('step-full-registration');
+            } else {
+                showMessage(result.data.message);
+            }
         }
     } catch (error) {
-        console.error("Find profile failed:", error);
-        showMessage("An error occurred while searching. This is likely due to a missing database index. Please check the browser console for a link to create it, or contact the administrator.");
+        console.error("Find profile function failed:", error);
+        showMessage("An error occurred while searching. Please try again later.");
     } finally {
         loadingScreen.classList.add('hidden');
     }
 });
 
 
+// --- The rest of the script.js file is unchanged ---
+// (registerForm, displayDashboard, etc.)
 registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (registerForm['register-password'].value !== registerForm['register-retype-password'].value) { showMessage("Passwords do not match."); return; }
@@ -415,8 +415,7 @@ const addMotherToggle = document.getElementById('add-mother-toggle'); addMotherT
 
 showLoginBtn.addEventListener('click', () => { loginForm.style.display = 'block'; registerContainer.style.display = 'none'; showLoginBtn.classList.add('border-blue-600', 'text-blue-600'); showRegisterBtn.classList.remove('border-blue-600', 'text-blue-600'); });
 showRegisterBtn.addEventListener('click', () => { loginForm.style.display = 'none'; registerContainer.style.display = 'block'; goToStep('step-initial-question'); showRegisterBtn.classList.add('border-blue-600', 'text-blue-600'); showLoginBtn.classList.remove('border-blue-600', 'text-blue-600'); });
-verifyIdForm.addEventListener('submit', async (e) => { e.preventDefault(); loadingScreen.classList.remove('hidden'); const sabhaId = verifyIdForm['verify-sabha-id'].value.trim(); const q = query(collection(db, "members"), where("sabhaId", "==", sabhaId), where("aadhaar", "==", verifyIdForm['verify-aadhaar'].value)); const querySnapshot = await getDocs(q); loadingScreen.classList.add('hidden'); if (querySnapshot.empty) { showMessage("Details not found."); } else { const doc = querySnapshot.docs[0]; if (doc.data().authUid) { showMessage("An online account already exists for this member."); return; } document.getElementById('verified-member-name').textContent = doc.data().fullName; document.getElementById('member-doc-id').value = doc.id; goToStep('step-create-login'); } });
-findIdForm.addEventListener('submit', async (e) => { e.preventDefault(); loadingScreen.classList.remove('hidden'); const q = query(collection(db, "members"), where("fullName", "==", findIdForm['find-fullName'].value.trim()), where("aadhaar", "==", findIdForm['find-aadhaar'].value), where("dob", "==", findIdForm['find-dob'].value)); const querySnapshot = await getDocs(q); loadingScreen.classList.add('hidden'); if (querySnapshot.empty) { showMessage("No profile found. Please proceed with new registration."); goToStep('step-full-registration'); } else { const doc = querySnapshot.docs[0]; if (doc.data().authUid) { showMessage("An online account already exists for this member."); return; } document.getElementById('verified-member-name').textContent = `${doc.data().fullName} (ID: ${doc.data().sabhaId})`; document.getElementById('member-doc-id').value = doc.id; goToStep('step-create-login'); } });
+
 createLoginForm.addEventListener('submit', async (e) => { e.preventDefault(); if (createLoginForm['create-password'].value !== createLoginForm['create-retype-password'].value) { showMessage("Passwords do not match."); return; } loadingScreen.classList.remove('hidden'); const email = createLoginForm['create-email'].value; const phone = createLoginForm['create-phone'].value; const password = createLoginForm['create-password'].value; const docId = createLoginForm['member-doc-id'].value; try { const userCredential = await createUserWithEmailAndPassword(auth, email, password); const user = userCredential.user; await updateDoc(doc(db, "members", docId), { authUid: user.uid, email: email, phone: phone }); showMessage("Account created! You are now logged in."); btnProceedDashboard.click(); } catch (error) { showMessage(`Account creation failed: ${error.message}`); } finally { loadingScreen.classList.add('hidden'); } });
 
 const maritalStatusSelect = document.getElementById('marital-status');
@@ -447,4 +446,3 @@ currentAddressTextarea.addEventListener('input', () => {
         permanentAddressTextarea.value = currentAddressTextarea.value;
     }
 });
-

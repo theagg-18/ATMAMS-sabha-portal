@@ -1,7 +1,7 @@
-// This file handles all logic for the logged-in user dashboard.
-import { auth, db } from './firebase.js';
+import { auth, db, functions } from './firebase.js';
+
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, getDoc, collection, query, where, getDocs, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 
@@ -64,9 +64,6 @@ export function initializeDashboard(ui, showMessage) {
         }
     });
 
-    // =================================================================
-    // UPDATED: This form now calls the new Cloud Function
-    // =================================================================
     addMemberForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         

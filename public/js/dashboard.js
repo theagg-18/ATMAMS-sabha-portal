@@ -1,7 +1,9 @@
 // This file handles all logic for the logged-in user dashboard.
 import { auth, db } from './firebase.js';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, collection, query, where, getDocs, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, getDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+
 
 let currentUserData = null; // Store current user's data for reuse
 
@@ -62,14 +64,13 @@ export function initializeDashboard(ui, showMessage) {
         }
     });
 
+    // =================================================================
+    // UPDATED: This form now calls the new Cloud Function
+    // =================================================================
     addMemberForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        if (!currentUserData || !currentUserData.familyId) {
-            showMessage("Could not identify current family. Please refresh.");
-            return;
-        }
-
-        const newMember = {
+        
+        const newMemberDetails = {
             fullName: addMemberForm.querySelector('input[name="newMemberFullName"]').value,
             role: addMemberForm.querySelector('select[name="newMemberRelation"]').value,
             aadhaar: addMemberForm.querySelector('input[name="newMemberAadhaar"]').value,
@@ -78,40 +79,40 @@ export function initializeDashboard(ui, showMessage) {
             bloodGroup: addMemberForm.querySelector('select[name="newMemberBloodGroup"]').value,
         };
 
-        if (!newMember.fullName || !newMember.role || !newMember.aadhaar || !newMember.dob) {
+        if (!newMemberDetails.fullName || !newMemberDetails.role || !newMemberDetails.aadhaar || !newMemberDetails.dob) {
             showMessage("Please fill out all required fields.");
             return;
         }
-        if (newMember.aadhaar.length !== 12) {
+        if (newMemberDetails.aadhaar.length !== 12) {
             showMessage("Aadhaar number must be 12 digits.");
+            return;
+        }
+        
+        const user = auth.currentUser;
+        if (!user) {
+            showMessage("You are not logged in. Please refresh the page.");
             return;
         }
 
         ui.loadingScreen.classList.remove('hidden');
         try {
-            await runTransaction(db, async (transaction) => {
-                const counterRef = doc(db, 'counters', 'memberCounter');
-                const counterDoc = await transaction.get(counterRef);
-                let newId = counterDoc.exists() ? counterDoc.data().currentId + 1 : 1;
-                const sabhaId = String(newId).padStart(7, '0');
-
-                const newMemberRef = doc(collection(db, 'members'));
-                transaction.set(newMemberRef, {
-                    ...newMember,
-                    sabhaId: sabhaId,
-                    familyId: currentUserData.familyId,
-                    registeredBy: currentUserData.authUid,
-                    createdAt: new Date(),
-                });
-                transaction.update(counterRef, { currentId: newId });
+            const linkOrCreateMember = httpsCallable(functions, 'linkOrCreateFamilyMember');
+            const result = await linkOrCreateMember({ 
+                newMemberDetails: newMemberDetails,
+                currentUserAuthUid: user.uid
             });
-            showMessage("Family member added successfully!");
-            addMemberForm.reset();
-            addMemberModal.classList.add('hidden');
-            await displayDashboard(currentUserData.authUid, ui, showMessage); // Refresh the dashboard
+            
+            if (result.data.success) {
+                showMessage(result.data.message);
+                addMemberForm.reset();
+                addMemberModal.classList.add('hidden');
+                await displayDashboard(user.uid, ui, showMessage); // Refresh the dashboard
+            } else {
+                showMessage(result.data.message || "An unknown error occurred.");
+            }
         } catch (error) {
             console.error("Failed to add family member:", error);
-            showMessage("Error adding family member. Please try again.");
+            showMessage("An error occurred: " + error.message);
         } finally {
             ui.loadingScreen.classList.add('hidden');
         }
@@ -170,4 +171,3 @@ async function refreshFamilyTree(familyId, currentUserId, container) {
         container.innerHTML = '<p class="text-gray-500">No other family members have been registered.</p>'; 
     }
 }
-

@@ -79,8 +79,6 @@ function main() {
                 ui.authScreen.classList.add('hidden');
                 ui.appScreen.classList.remove('hidden');
             } else {
-                // This can happen if data doesn't exist yet for a new user
-                // Or if there's an error. We stay on the auth screen.
                 ui.authScreen.classList.remove('hidden');
                 ui.appScreen.classList.add('hidden');
             }

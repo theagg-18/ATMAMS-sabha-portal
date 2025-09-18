@@ -6,9 +6,7 @@ import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/
 import { initializeAuth } from './auth.js';
 import { initializeDashboard, displayDashboard } from './dashboard.js';
 
-// --- Main Application Logic ---
 function main() {
-    // This function runs after the DOM is fully loaded.
     const ui = {
         loadingScreen: document.getElementById('loading-screen'),
         authScreen: document.getElementById('auth-screen'),
@@ -96,3 +94,4 @@ function main() {
 }
 
 document.addEventListener('DOMContentLoaded', main);
+

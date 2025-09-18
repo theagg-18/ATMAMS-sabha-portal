@@ -1,8 +1,8 @@
-// This file handles all logic for authentication: login, register, password reset, etc.
+// This file handles all logic for authentication: login, registration, password reset, etc.
 
 import { auth, db, functions } from './firebase.js';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, deleteUser, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, collection, runTransaction, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, deleteUser, sendPasswordResetEmail, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, collection, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 // This function will be called by main.js to set up all event listeners
@@ -157,8 +157,7 @@ export function initializeAuth(ui, showMessage, goToStep, displayRegistrationSuc
         const docId = createLoginForm['member-doc-id'].value;
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            const user = userCredential.user;
-            await updateDoc(doc(db, "members", docId), { authUid: user.uid, email: email, phone: phone });
+            await updateDoc(doc(db, "members", docId), { authUid: userCredential.user.uid, email: email, phone: phone });
             // onAuthStateChanged will handle the redirect to the dashboard
         } catch (error) {
             showMessage(`Account creation failed: ${error.message}`);

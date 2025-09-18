@@ -1,6 +1,6 @@
 // This file handles all logic for the logged-in user dashboard.
 import { auth, db } from './firebase.js';
-import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc, collection, query, where, getDocs, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 let currentUserData = null; // Store current user's data for reuse
@@ -16,13 +16,51 @@ export function initializeDashboard(ui, showMessage) {
 
     closeAddMemberModalBtn.addEventListener('click', () => {
         addMemberModal.classList.add('hidden');
+        addMemberForm.reset();
     });
 
     cancelAddMemberBtn.addEventListener('click', () => {
         addMemberModal.classList.add('hidden');
+        addMemberForm.reset();
     });
 
-    changePasswordForm.addEventListener('submit', async (e) => { /* ... change password logic ... */ });
+    changePasswordForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const currentPassword = document.getElementById('current-password').value;
+        const newPassword = document.getElementById('new-password').value;
+        const retypeNewPassword = document.getElementById('retype-new-password').value;
+
+        if (newPassword !== retypeNewPassword) {
+            showMessage("New passwords do not match.");
+            return;
+        }
+        
+        const user = auth.currentUser;
+        if (!user) {
+            showMessage("No user is currently logged in.");
+            return;
+        }
+
+        ui.loadingScreen.classList.remove('hidden');
+        try {
+            const credential = EmailAuthProvider.credential(user.email, currentPassword);
+            await reauthenticateWithCredential(user, credential);
+            await updatePassword(user, newPassword);
+            showMessage("Password updated successfully!");
+            changePasswordForm.reset();
+        } catch (error) {
+            console.error("Password change failed:", error);
+            let friendlyMessage = "Failed to change password.";
+            if (error.code === 'auth/wrong-password') {
+                friendlyMessage = "The current password you entered is incorrect.";
+            } else if (error.code === 'auth/weak-password') {
+                friendlyMessage = "Your new password is too weak. It must be at least 6 characters long.";
+            }
+            showMessage(friendlyMessage);
+        } finally {
+            ui.loadingScreen.classList.add('hidden');
+        }
+    });
 
     addMemberForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -40,7 +78,6 @@ export function initializeDashboard(ui, showMessage) {
             bloodGroup: addMemberForm.querySelector('select[name="newMemberBloodGroup"]').value,
         };
 
-        // Simple validation
         if (!newMember.fullName || !newMember.role || !newMember.aadhaar || !newMember.dob) {
             showMessage("Please fill out all required fields.");
             return;
@@ -83,20 +120,32 @@ export function initializeDashboard(ui, showMessage) {
 
 // Fetches all data and populates the dashboard
 export async function displayDashboard(userId, ui, showMessage) {
-    const userDocRef = doc(db, 'members', userId);
-    const userDocSnap = await getDoc(userDocRef);
+    try {
+        const userDocRef = doc(db, 'members', userId);
+        const userDocSnap = await getDoc(userDocRef);
 
-    if (!userDocSnap.exists()) {
-        showMessage("Could not find your member data.");
-        return;
+        if (!userDocSnap.exists()) {
+            showMessage("Could not find your member data. Please log out and log in again.");
+            signOut(auth);
+            return false; // Indicate failure
+        }
+        currentUserData = userDocSnap.data();
+
+        ui.userWelcome.textContent = `Welcome, ${currentUserData.fullName.split(' ')[0]}!`;
+        // Populate ID card
+        document.getElementById('id-card-name').textContent = currentUserData.fullName;
+        document.getElementById('id-card-sabha-id').textContent = currentUserData.sabhaId;
+        document.getElementById('id-card-email').textContent = currentUserData.email || 'Not set';
+        document.getElementById('id-card-phone').textContent = currentUserData.phone || 'Not set';
+
+        await refreshFamilyTree(currentUserData.familyId, userId, ui.familyTreeContainer);
+        return true; // Indicate success
+    } catch (error) {
+        console.error("Error displaying dashboard:", error);
+        showMessage("An error occurred while loading your dashboard.");
+        signOut(auth);
+        return false; // Indicate failure
     }
-    currentUserData = userDocSnap.data(); // Store data for later use
-
-    // Populate ID card, welcome message, etc.
-    // ... logic remains the same ...
-
-    // Populate family tree
-    await refreshFamilyTree(currentUserData.familyId, userId, ui.familyTreeContainer);
 }
 
 async function refreshFamilyTree(familyId, currentUserId, container) {
@@ -121,3 +170,4 @@ async function refreshFamilyTree(familyId, currentUserId, container) {
         container.innerHTML = '<p class="text-gray-500">No other family members have been registered.</p>'; 
     }
 }
+

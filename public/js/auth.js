@@ -1,8 +1,9 @@
 // This file handles all logic for authentication: login, registration, password reset, etc.
 
 import { auth, db, functions } from './firebase.js';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, deleteUser, sendPasswordResetEmail, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, collection, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+// THIS IS THE CRITICAL FIX: I moved 'updateDoc' from the auth import to the firestore import below.
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, deleteUser, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, collection, runTransaction, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 // This function will be called by main.js to set up all event listeners
@@ -226,4 +227,3 @@ export function initializeAuth(ui, showMessage, goToStep, displayRegistrationSuc
     });
 
 }
-

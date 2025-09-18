@@ -109,6 +109,69 @@ loginForm.addEventListener('submit', async (e) => {
     finally { loadingScreen.classList.add('hidden'); }
 });
 
+verifyIdForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    loadingScreen.classList.remove('hidden');
+    try {
+        const sabhaId = document.getElementById('verify-sabha-id').value.trim();
+        const aadhaar = document.getElementById('verify-aadhaar').value;
+        const q = query(collection(db, "members"), where("sabhaId", "==", sabhaId), where("aadhaar", "==", aadhaar));
+        const querySnapshot = await getDocs(q);
+        
+        if (querySnapshot.empty) {
+            showMessage("Details not found. Please check your Sabha ID and Aadhaar number.");
+        } else {
+            const memberDoc = querySnapshot.docs[0];
+            const memberData = memberDoc.data();
+            if (memberData.authUid) {
+                showMessage("An online account already exists for this member. Please use the Login page.");
+                return;
+            }
+            document.getElementById('verified-member-name').textContent = memberData.fullName;
+            document.getElementById('member-doc-id').value = memberDoc.id;
+            goToStep('step-create-login');
+        }
+    } catch (error) {
+        console.error("Verification failed:", error);
+        showMessage("An error occurred during verification. This is likely due to a missing database index. Please check the browser console for a link to create it, or contact the administrator.");
+    } finally {
+        loadingScreen.classList.add('hidden');
+    }
+});
+
+findIdForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    loadingScreen.classList.remove('hidden');
+    try {
+        const fullName = document.getElementById('find-fullName').value.trim();
+        const aadhaar = document.getElementById('find-aadhaar').value;
+        const dob = document.getElementById('find-dob').value;
+        const q = query(collection(db, "members"), where("fullName", "==", fullName), where("aadhaar", "==", aadhaar), where("dob", "==", dob));
+        const querySnapshot = await getDocs(q);
+        
+        if (querySnapshot.empty) {
+            showMessage("No profile found with those details. Please proceed with a new registration.");
+            goToStep('step-full-registration');
+        } else {
+            const memberDoc = querySnapshot.docs[0];
+            const memberData = memberDoc.data();
+            if (memberData.authUid) {
+                showMessage("An online account already exists for this member. Please use the Login page.");
+                return;
+            }
+            document.getElementById('verified-member-name').textContent = `${memberData.fullName} (ID: ${memberData.sabhaId})`;
+            document.getElementById('member-doc-id').value = memberDoc.id;
+            goToStep('step-create-login');
+        }
+    } catch (error) {
+        console.error("Find profile failed:", error);
+        showMessage("An error occurred while searching. This is likely due to a missing database index. Please check the browser console for a link to create it, or contact the administrator.");
+    } finally {
+        loadingScreen.classList.add('hidden');
+    }
+});
+
+
 registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (registerForm['register-password'].value !== registerForm['register-retype-password'].value) { showMessage("Passwords do not match."); return; }
@@ -384,3 +447,4 @@ currentAddressTextarea.addEventListener('input', () => {
         permanentAddressTextarea.value = currentAddressTextarea.value;
     }
 });
+

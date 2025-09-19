@@ -9,7 +9,7 @@ const firebaseConfig = {
     apiKey: "AIzaSyBsraiG11tJCu5CYRiQiqe3kaVJShh_cfI",
     authDomain: "atmams-sabhaid-system.firebaseapp.com",
     projectId: "atmams-sabhaid-system",
-    storageBucket: "atmams-sabhaid-system.appspot.com",
+    storageBucket: "atmams-sabhaid-system.firebasestorage.app",
     messagingSenderId: "187796742502",
     appId: "1:187796742502:web:f6f808cb9d555b67e6a8a7",
     measurementId: "G-0TV419DPH1"

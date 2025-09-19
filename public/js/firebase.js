@@ -1,9 +1,9 @@
-// This file initializes Firebase and exports the services for other modules to use.
-
+// Version: 2.0.0
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getFunctions } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+import { getStorage } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyBsraiG11tJCu5CYRiQiqe3kaVJShh_cfI",
@@ -19,6 +19,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const functions = getFunctions(app, "asia-south1");
+const storage = getStorage(app);
 
-// Export the initialized services
-export { auth, db, functions };
+export { auth, db, functions, storage };
+

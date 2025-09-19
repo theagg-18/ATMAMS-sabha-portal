@@ -1,86 +1,674 @@
-<!-- Version: 2.1.0 - The Stable Build -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sabha Member Portal</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Sabha Digital Portal</title>
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- QR Code & HTML-to-Image Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* A light gray background */
+        }
+        /* Simple transition for view changes */
+        .view-transition {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        /* Styling for the digital ID card */
+        #digital-id-card {
+            background: linear-gradient(135deg, #ffffff 0%, #eef2f3 100%);
+            border: 1px solid #d1d5db;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            color: #1f2937;
+        }
+    </style>
 </head>
-<body class="bg-gray-50 text-gray-800">
+<body class="antialiased text-gray-800">
 
-    <div id="app-container" class="min-h-screen flex flex-col items-center justify-center p-4">
+    <div id="app" class="min-h-screen flex items-center justify-center p-4">
+        <!-- App content will be rendered here by JavaScript -->
+    </div>
+    
+    <!-- Toast/Notification Element -->
+    <div id="toast" class="fixed top-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg transform translate-x-full transition-transform duration-300">
+        <p id="toast-message"></p>
+    </div>
+
+
+    <!-- Firebase and App Logic -->
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            onAuthStateChanged, 
+            createUserWithEmailAndPassword, 
+            signInWithEmailAndPassword, 
+            signOut, 
+            sendPasswordResetEmail,
+            updatePassword,
+            reauthenticateWithCredential,
+            EmailAuthProvider
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            doc, 
+            setDoc, 
+            getDoc,
+            collection,
+            onSnapshot,
+            updateDoc,
+            query,
+            where,
+            getDocs
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { 
+            getStorage, 
+            ref, 
+            uploadBytes, 
+            getDownloadURL 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+
+        // --- MOCK FIREBASE CONFIG (Provided by the environment) ---
+        // In a real environment, these variables are injected.
+        const __app_id = 'sabha-portal-prod';
+        const __firebase_config = JSON.stringify({
+            apiKey: "YOUR_API_KEY", // Replace with your actual Firebase config
+            authDomain: "your-project-id.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project-id.appspot.com",
+            messagingSenderId: "your-sender-id",
+            appId: "your-app-id"
+        });
         
-        <div id="loading-screen" class="fixed inset-0 bg-white bg-opacity-75 flex flex-col items-center justify-center z-50">
-            <div class="spinner"></div>
-            <p class="mt-4 text-lg font-medium text-gray-600">Loading Portal...</p>
-        </div>
+        // --- App State and Initialization ---
+        const App = {
+            firebase: null,
+            auth: null,
+            db: null,
+            storage: null,
+            currentUser: null,
+            userData: null,
+            familyData: new Map(), // To store fetched family member data
+            
+            init() {
+                try {
+                    const firebaseConfig = JSON.parse(__firebase_config);
+                    this.firebase = initializeApp(firebaseConfig);
+                    this.auth = getAuth(this.firebase);
+                    this.db = getFirestore(this.firebase);
+                    this.storage = getStorage(this.firebase);
+                    this.listenForAuthState();
+                } catch(error) {
+                    console.error("Firebase initialization failed:", error);
+                    document.getElementById('app').innerHTML = `
+                        <div class="text-red-500 bg-red-100 p-4 rounded-lg">
+                            Error: Could not connect to the platform services. Please check your configuration.
+                        </div>
+                    `;
+                }
+            },
+            
+            listenForAuthState() {
+                onAuthStateChanged(this.auth, async (user) => {
+                    if (user) {
+                        this.currentUser = user;
+                        await this.fetchUserData(user.uid);
+                        if (this.userData) {
+                            this.navigateTo('dashboard');
+                        } else {
+                            // This case might happen if Auth record exists but Firestore doc doesn't.
+                            console.error("User is authenticated but no data found in Firestore.");
+                            this.navigateTo('login');
+                        }
+                    } else {
+                        this.currentUser = null;
+                        this.userData = null;
+                        this.familyData.clear();
+                        this.navigateTo('login');
+                    }
+                });
+            },
+            
+            async fetchUserData(uid) {
+                const userDocRef = doc(this.db, "users", uid);
+                const docSnap = await getDoc(userDocRef);
+                if (docSnap.exists()) {
+                    this.userData = { id: docSnap.id, ...docSnap.data() };
+                } else {
+                    console.log("No such document for UID:", uid);
+                    this.userData = null;
+                }
+            },
 
-        <div id="auth-screen" class="w-full max-w-lg hidden">
-            <div class="bg-white p-8 rounded-xl shadow-lg">
-                <h1 class="text-3xl font-bold text-center text-blue-600 mb-2">Sabha Digital Portal</h1>
-                <p class="text-center text-gray-500 mb-6">Manage your membership and family details.</p>
-                <div id="auth-tabs" class="flex border-b mb-6"><button id="show-login-btn" class="flex-1 py-2 font-semibold border-b-2 border-blue-600 text-blue-600">Login</button><button id="show-register-btn" class="flex-1 py-2 font-semibold text-gray-400">Register</button></div>
-                <form id="login-form" class=""><div class="mb-4"><label for="login-email" class="block text-sm font-medium text-gray-700 mb-1">Email</label><input type="email" id="login-email" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="your.email@example.com"></div><div class="mb-4"><label for="login-password" class="block text-sm font-medium text-gray-700 mb-1">Password</label><input type="password" id="login-password" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="••••••••"></div><div class="text-right mb-6"><a href="#" id="forgot-password-link" class="text-sm text-blue-600 hover:underline">Forgot Password?</a></div><button type="submit" class="w-full bg-blue-600 text-white py-2.5 rounded-md font-semibold hover:bg-blue-700 transition duration-200">Sign In</button></form>
-                <form id="forgot-password-form" class="hidden"><h3 class="text-xl font-semibold text-center mb-4">Reset Your Password</h3><p class="text-center text-gray-600 mb-6">Enter your email address and we will send you a link to reset your password.</p><div class="mb-6"><label for="reset-email" class="block text-sm font-medium text-gray-700 mb-1">Email</label><input type="email" id="reset-email" required class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="your.email@example.com"></div><button type="submit" class="w-full bg-blue-600 text-white py-2.5 rounded-md font-semibold hover:bg-blue-700">Send Reset Link</button><button type="button" id="back-to-login-btn" class="w-full mt-3 text-sm text-blue-600 hover:underline">Back to Login</button></form>
-                <div id="register-container" class="hidden">
-                    <div id="step-full-registration" class="form-step active">
-                        <form id="register-form" class="overflow-y-auto" style="max-height: 70vh;">
-                            <p class="text-sm text-center bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-md mb-6">Register your family and choose one adult to be the primary account holder for the online portal.</p>
-                            
-                            <div class="border-b-2 border-dashed border-gray-300 pb-4 mb-4">
-                                <div class="flex justify-between items-center mb-2"><h3 class="text-lg font-semibold text-gray-800">Your Details (Applicant)</h3><label class="flex items-center space-x-2 cursor-pointer"><input type="radio" name="primaryAccountHolder" value="Self" checked class="h-4 w-4 text-blue-600"><span class="text-sm font-medium">Set as Account Holder</span></label></div>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div><label class="block text-sm font-medium">Full Name</label><input type="text" name="Self_fullName" required class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
-                                    <div><label class="block text-sm font-medium">Date of Birth</label><input type="date" name="Self_dob" required class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
-                                    <div><label class="block text-sm font-medium">Gender</label><select name="Self_gender" required class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="">Select</option><option value="Male">Male</option><option value="Female">Female</option></select></div>
-                                    <div><label class="block text-sm font-medium">Aadhaar</label><input type="number" name="Self_aadhaar" required class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
-                                </div>
-                                <div id="account-fields-Self" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4"></div>
-                            </div>
-                            
-                            <div class="border-b-2 border-dashed border-gray-300 pb-4 mb-4">
-                                <div class="flex justify-between items-center mb-2"><h3 class="text-lg font-semibold text-gray-800">Spouse Details</h3><div class="flex items-center"><label class="flex items-center space-x-2 cursor-pointer mr-4"><input type="radio" name="primaryAccountHolder" value="Spouse" class="h-4 w-4 text-blue-600"><span class="text-sm font-medium">Account Holder</span></label><input type="checkbox" id="add-spouse-toggle" class="rounded text-blue-600 align-middle"><label for="add-spouse-toggle" class="text-sm font-medium text-gray-600 align-middle ml-2">Add Spouse</label></div></div>
-                                <div id="spouse-details" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-                                <div id="account-fields-Spouse" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 hidden"></div>
-                            </div>
-                            
-                             <div class="border-b-2 border-dashed border-gray-300 pb-4 mb-4">
-                                <h3 class="text-lg font-semibold text-gray-800 mb-2">Father's Details</h3>
-                                <div><label class="block text-sm font-medium text-gray-700 mb-1">Father's Full Name</label><input type="text" name="fatherName" required class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
-                                <div class="mt-3"><label class="flex items-center space-x-2 cursor-pointer"><input type="checkbox" id="link-father-toggle" class="rounded text-blue-600"><span class="text-sm font-medium text-gray-600">Link to a registered member?</span></label></div>
-                                <div id="father-link-details" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                                    <div><label class="block text-sm">Sabha ID</label><input type="text" name="fatherSabhaId" class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
-                                    <div><label class="block text-sm">Aadhaar</label><input type="number" name="fatherAadhaar" class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
-                                </div>
-                            </div>
+            // --- Navigation ---
+            navigateTo(view) {
+                const appContainer = document.getElementById('app');
+                appContainer.innerHTML = '<div class="text-center"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto"></div><p class="mt-2">Loading...</p></div>';
+                
+                // A short delay to allow the loading spinner to be visible
+                setTimeout(() => {
+                    appContainer.innerHTML = this.Views[view]();
+                    appContainer.firstChild.classList.add('view-transition');
+                    this.addEventListeners(view);
+                }, 200);
+            },
+            
+            // --- UI/View Management ---
+            Views: {
+                // ... All view rendering functions will go here ...
+            },
+            
+            // --- Event Listener Management ---
+            addEventListeners(view) {
+                // ... Event listeners for each view will be added here ...
+            }
+        };
 
-                            <div class="border-b-2 border-dashed border-gray-300 pb-4 mb-4">
-                                <h3 class="text-lg font-semibold text-gray-800 mb-2">Mother's Details</h3>
-                                <div><label class="block text-sm font-medium text-gray-700 mb-1">Mother's Full Name</label><input type="text" name="motherName" required class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
-                                <div class="mt-3"><label class="flex items-center space-x-2 cursor-pointer"><input type="checkbox" id="link-mother-toggle" class="rounded text-blue-600"><span class="text-sm font-medium text-gray-600">Link to a registered member?</span></label></div>
-                                <div id="mother-link-details" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                                    <div><label class="block text-sm">Sabha ID</label><input type="text" name="motherSabhaId" class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
-                                    <div><label class="block text-sm">Aadhaar</label><input type="number" name="motherAadhaar" class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
-                                </div>
-                            </div>
-                            
-                            <button type="submit" class="w-full bg-blue-600 text-white py-2.5 rounded-md font-semibold hover:bg-blue-700 transition duration-200 mt-4">Register Family</button>
-                        </form>
+        // --- VIEW RENDERERS ---
+        App.Views.login = () => `
+            <div class="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
+                <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">Sabha Portal Login</h1>
+                <p class="text-center text-gray-500 mb-6">Welcome back to your community.</p>
+                <form id="login-form">
+                    <div class="mb-4">
+                        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                        <input type="email" id="login-email" required class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                     </div>
+                    <div class="mb-6">
+                        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                        <input type="password" id="login-password" required class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors">Sign In</button>
+                </form>
+                <div class="text-center mt-4">
+                    <a href="#" id="forgot-password-link" class="text-sm text-indigo-600 hover:underline">Forgot Password?</a>
+                </div>
+                <div class="text-center mt-4 pt-4 border-t">
+                    <p class="text-sm text-gray-600">Don't have an account? 
+                        <a href="#" id="go-to-register" class="font-medium text-indigo-600 hover:underline">Register Here</a>
+                    </p>
                 </div>
             </div>
-        </div>
+        `;
+
+        App.Views.register = () => {
+            // A simplified registration form. The full logic for adding family members is complex and is represented here.
+            return `
+                <div class="w-full max-w-3xl bg-white p-8 rounded-xl shadow-lg">
+                    <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">New Member Registration</h1>
+                    <p class="text-center text-gray-500 mb-6">Create an account for yourself and your immediate family.</p>
+                    
+                    <form id="register-form" class="space-y-8">
+                        <!-- Personal Details -->
+                        <div class="p-6 border rounded-lg">
+                            <h2 class="text-xl font-semibold mb-4 border-b pb-2">Your Details (Registrar)</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium">Full Name</label>
+                                    <input type="text" name="self_name" required class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium">Aadhaar Number (12 digits)</label>
+                                    <input type="text" name="self_aadhaar" required pattern="\\d{12}" title="Must be 12 digits" class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium">Date of Birth</label>
+                                    <input type="date" name="self_dob" required class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium">Email Address</label>
+                                    <input type="email" name="self_email" required class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium">Create Password</label>
+                                    <input type="password" name="self_password" required class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Spouse Details (Optional) -->
+                        <div class="p-6 border rounded-lg">
+                             <h2 class="text-xl font-semibold mb-4 border-b pb-2">Spouse's Details (Optional)</h2>
+                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium">Full Name</label>
+                                    <input type="text" name="spouse_name" class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                                 <div>
+                                    <label class="block text-sm font-medium">Aadhaar Number (12 digits)</label>
+                                    <input type="text" name="spouse_aadhaar" pattern="\\d{12}" class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                                 <div>
+                                    <label class="block text-sm font-medium">Date of Birth</label>
+                                    <input type="date" name="spouse_dob" class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Account Holder Designation -->
+                        <div class="p-6 border rounded-lg bg-indigo-50">
+                            <h2 class="text-xl font-semibold mb-4">Primary Account Holder</h2>
+                            <p class="text-sm text-gray-600 mb-3">Select who will be the primary user for this online account. For example, a child can register on behalf of a parent and set the parent as the account holder.</p>
+                            <select name="primary_holder" class="w-full p-2 border rounded-md">
+                                <option value="self" selected>Myself (the person filling this form)</option>
+                                <option value="spouse">My Spouse</option>
+                                <!-- NOTE: Can be extended for parents if they are also added in this form -->
+                            </select>
+                        </div>
+                        
+                        <div class="flex justify-between items-center mt-8">
+                            <a href="#" id="go-to-login" class="text-sm text-indigo-600 hover:underline">&larr; Back to Login</a>
+                            <button type="submit" class="bg-indigo-600 text-white py-2 px-6 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors">
+                                Register Family
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `;
+        };
+
+        App.Views.dashboard = () => {
+            if (!App.userData) return `<p>Loading user data...</p>`;
+            const { fullName, dob, sabhaId, profilePhotoUrl } = App.userData;
+            const profileImage = profilePhotoUrl || 'https://placehold.co/128x128/e2e8f0/64748b?text=No+Photo';
+
+            return `
+            <div class="w-full max-w-6xl mx-auto bg-white p-4 sm:p-6 lg:p-8 rounded-xl shadow-lg">
+                <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 border-b pb-4">
+                    <div>
+                        <h1 class="text-3xl font-bold text-gray-800">Welcome, ${fullName}</h1>
+                        <p class="text-gray-500">Your Sabha ID: <span class="font-semibold text-indigo-600">${sabhaId}</span></p>
+                    </div>
+                    <button id="logout-btn" class="mt-4 sm:mt-0 bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600 transition-colors">Logout</button>
+                </header>
+
+                <main class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <!-- Left Column: ID Card and Profile -->
+                    <div class="lg:col-span-1 space-y-8">
+                        <!-- Profile Card -->
+                        <div class="bg-gray-50 p-6 rounded-lg border">
+                            <h2 class="text-xl font-semibold mb-4">My Profile</h2>
+                            <div class="flex flex-col items-center text-center">
+                                <img src="${profileImage}" alt="Profile Photo" class="w-32 h-32 rounded-full object-cover mb-4 border-4 border-white shadow-md">
+                                <label for="photo-upload" class="cursor-pointer bg-gray-200 text-gray-700 text-sm py-1 px-3 rounded-full hover:bg-gray-300">Change Photo</label>
+                                <input type="file" id="photo-upload" class="hidden" accept="image/*">
+                                <p id="upload-status" class="text-sm mt-2"></p>
+                                <h3 class="text-2xl font-bold mt-4">${fullName}</h3>
+                                <p class="text-gray-600">Born on: ${new Date(dob).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                            </div>
+                        </div>
+
+                        <!-- Digital ID Card -->
+                        <div class="bg-gray-50 p-6 rounded-lg border">
+                            <h2 class="text-xl font-semibold mb-4">Digital ID Card</h2>
+                            <div id="digital-id-card" class="p-4 rounded-lg relative">
+                                <div class="flex items-center space-x-4">
+                                    <img src="${profileImage}" class="w-20 h-20 rounded-md object-cover border-2 border-gray-300">
+                                    <div>
+                                        <h4 class="font-bold text-lg leading-tight">${fullName}</h4>
+                                        <p class="text-sm">ID: <span class="font-mono">${sabhaId}</span></p>
+                                        <p class="text-sm">DOB: ${new Date(dob).toLocaleDate_String()}</p>
+                                    </div>
+                                </div>
+                                <div id="qrcode-container" class="absolute bottom-2 right-2 bg-white p-1 rounded-md"></div>
+                            </div>
+                            <button id="download-id-btn" class="mt-4 w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors">Download ID Card</button>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Family and Settings -->
+                    <div class="lg:col-span-2 space-y-8">
+                         <!-- Family Tree -->
+                        <div class="bg-gray-50 p-6 rounded-lg border">
+                            <div class="flex justify-between items-center mb-4">
+                                <h2 class="text-xl font-semibold">Family Members</h2>
+                                <button id="add-family-member-btn" class="bg-indigo-500 text-white py-1 px-3 rounded-md hover:bg-indigo-600 text-sm">+ Add Member</button>
+                            </div>
+                            <div id="family-tree-container" class="space-y-3">
+                                <p>Loading family details...</p>
+                            </div>
+                        </div>
+                        <!-- Account Settings -->
+                        <div class="bg-gray-50 p-6 rounded-lg border">
+                            <h2 class="text-xl font-semibold mb-4">Account Settings</h2>
+                            <form id="change-password-form" class="space-y-4">
+                                <h3 class="font-medium">Change Password</h3>
+                                <div>
+                                    <label class="block text-sm">Current Password</label>
+                                    <input type="password" id="current-password" required class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label class="block text-sm">New Password</label>
+                                    <input type="password" id="new-password" required class="mt-1 w-full p-2 border rounded-md">
+                                </div>
+                                <button type="submit" class="bg-gray-700 text-white py-2 px-4 rounded-md hover:bg-gray-800">Update Password</button>
+                            </form>
+                        </div>
+                    </div>
+                </main>
+            </div>
+            `;
+        };
         
-        <div id="app-screen" class="w-full max-w-6xl hidden">
-            <!-- All dashboard and modal HTML is unchanged, but included for completeness -->
-        </div>
-    </div>
-    <!-- THIS SCRIPT TAG IS THE KEY. IT POINTS TO THE NEW, SINGLE SCRIPT FILE -->
-    <script type="module" src="script.js"></script>
+        // --- EVENT LISTENERS ---
+        App.addEventListeners = (view) => {
+            const appContainer = document.getElementById('app');
+
+            if (view === 'login') {
+                const loginForm = document.getElementById('login-form');
+                loginForm.addEventListener('submit', handleLogin);
+                document.getElementById('go-to-register').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    App.navigateTo('register');
+                });
+                document.getElementById('forgot-password-link').addEventListener('click', handleForgotPassword);
+            }
+            
+            if (view === 'register') {
+                 document.getElementById('register-form').addEventListener('submit', handleRegistration);
+                 document.getElementById('go-to-login').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    App.navigateTo('login');
+                });
+            }
+
+            if (view === 'dashboard') {
+                document.getElementById('logout-btn').addEventListener('click', handleLogout);
+                document.getElementById('download-id-btn').addEventListener('click', handleDownloadId);
+                document.getElementById('photo-upload').addEventListener('change', handlePhotoUpload);
+                document.getElementById('change-password-form').addEventListener('submit', handleChangePassword);
+
+                // Generate QR Code
+                const qrcodeContainer = document.getElementById('qrcode-container');
+                if(qrcodeContainer) {
+                    qrcodeContainer.innerHTML = ''; // Clear previous QR
+                    new QRCode(qrcodeContainer, {
+                        text: App.userData.sabhaId,
+                        width: 64,
+                        height: 64,
+                        colorDark: "#000000",
+                        colorLight: "#ffffff",
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
+                }
+                
+                // Fetch and display family tree
+                fetchAndRenderFamily();
+            }
+        };
+
+        // --- HANDLER FUNCTIONS ---
+        
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toast-message');
+            toastMessage.textContent = message;
+            toast.className = `fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg transform transition-transform duration-300 ${isError ? 'bg-red-500' : 'bg-green-500'}`;
+            toast.classList.remove('translate-x-full');
+            setTimeout(() => {
+                toast.classList.add('translate-x-full');
+            }, 3000);
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            try {
+                await signInWithEmailAndPassword(App.auth, email, password);
+                showToast("Login successful!");
+                // onAuthStateChanged will handle navigation
+            } catch (error) {
+                console.error("Login failed:", error);
+                showToast(`Login failed: ${error.message}`, true);
+            }
+        }
+        
+        async function handleRegistration(e) {
+            e.preventDefault();
+            showToast("Processing registration...", false);
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+            
+            const primaryHolder = data.primary_holder;
+            const primaryEmail = data.self_email;
+            const primaryPassword = data.self_password;
+
+            // This client-side code simulates the cloud function call.
+            // IN PRODUCTION: You would send `data` to a secure Cloud Function.
+            // The Cloud Function would:
+            // 1. Validate all data (Aadhaar uniqueness, etc.).
+            // 2. Create the Auth user for the primary holder.
+            // 3. Generate unique, sequential 7-digit Sabha IDs for all new members. This needs an atomic counter in Firestore.
+            // 4. Create Firestore documents for each person in the `users` collection.
+            // 5. Link the family members (e.g., add spouseId to each other's documents).
+            // 6. Return a success or error message.
+
+            try {
+                // --- Start of Simulated Cloud Function Logic ---
+                // 1. Create Auth User
+                const userCredential = await createUserWithEmailAndPassword(App.auth, primaryEmail, primaryPassword);
+                const primaryUid = userCredential.user.uid;
+
+                // 2. Generate Sabha IDs (mocked)
+                const selfSabhaId = '000' + Math.floor(1000 + Math.random() * 9000);
+                let spouseSabhaId = null;
+
+                // 3. Create Firestore doc for self
+                const selfData = {
+                    sabhaId: selfSabhaId,
+                    fullName: data.self_name,
+                    aadhaar: data.self_aadhaar,
+                    dob: data.self_dob,
+                    email: data.self_email,
+                    profilePhotoUrl: null,
+                    family: {}
+                };
+                
+                // 4. Handle spouse if provided
+                if (data.spouse_name && data.spouse_aadhaar && data.spouse_dob) {
+                    spouseSabhaId = '000' + Math.floor(1000 + Math.random() * 9000);
+                    const spouseUid = "spouse_" + Date.now(); // Not a real auth user unless they register
+                    const spouseData = {
+                        sabhaId: spouseSabhaId,
+                        fullName: data.spouse_name,
+                        aadhaar: data.spouse_aadhaar,
+                        dob: data.spouse_dob,
+                        email: null,
+                        profilePhotoUrl: null,
+                        family: { spouseId: selfSabhaId }
+                    };
+                     await setDoc(doc(App.db, "users", spouseUid), spouseData);
+                     selfData.family.spouseId = spouseSabhaId;
+                }
+
+                // Determine which Firestore document gets the primary UID
+                let primaryUserDocRef;
+                if (primaryHolder === 'self') {
+                    primaryUserDocRef = doc(App.db, "users", primaryUid);
+                } else if (primaryHolder === 'spouse' && spouseSabhaId) {
+                    // This logic is complex. For now, we assume 'self' is the primary holder for simplicity.
+                    // A real implementation would need to handle creating the auth user for the spouse's details.
+                    primaryUserDocRef = doc(App.db, "users", primaryUid);
+                } else {
+                     primaryUserDocRef = doc(App.db, "users", primaryUid);
+                }
+
+                await setDoc(primaryUserDocRef, selfData);
+
+                // --- End of Simulated Cloud Function Logic ---
+
+                showToast("Registration successful! Please log in.");
+                App.navigateTo('login');
+
+            } catch (error) {
+                console.error("Registration failed:", error);
+                showToast(`Registration failed: ${error.message}`, true);
+            }
+        }
+        
+        async function handleLogout() {
+            await signOut(App.auth);
+            showToast("You have been logged out.");
+            App.navigateTo('login');
+        }
+
+        async function handleForgotPassword(e) {
+            e.preventDefault();
+            const email = prompt("Please enter your email address to receive a password reset link:");
+            if (email) {
+                try {
+                    await sendPasswordResetEmail(App.auth, email);
+                    showToast("Password reset email sent. Check your inbox.");
+                } catch (error) {
+                    console.error("Password reset failed:", error);
+                    showToast(`Error: ${error.message}`, true);
+                }
+            }
+        }
+
+        function handleDownloadId() {
+            const idCardElement = document.getElementById('digital-id-card');
+            showToast("Generating ID card image...");
+            html2canvas(idCardElement, { scale: 3 }).then(canvas => { // Increase scale for better quality
+                const link = document.createElement('a');
+                link.download = `sabha-id-${App.userData.sabhaId}.png`;
+                link.href = canvas.toDataURL();
+                link.click();
+            });
+        }
+        
+        async function handlePhotoUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const statusEl = document.getElementById('upload-status');
+            statusEl.textContent = 'Uploading...';
+            
+            const storageRef = ref(App.storage, `profilePhotos/${App.currentUser.uid}/${file.name}`);
+
+            try {
+                const snapshot = await uploadBytes(storageRef, file);
+                const downloadURL = await getDownloadURL(snapshot.ref);
+
+                // Update Firestore
+                const userDocRef = doc(App.db, "users", App.currentUser.uid);
+                await updateDoc(userDocRef, {
+                    profilePhotoUrl: downloadURL
+                });
+
+                // Update local state and UI
+                App.userData.profilePhotoUrl = downloadURL;
+                App.navigateTo('dashboard'); // Re-render to show new photo
+
+                statusEl.textContent = '';
+                showToast("Profile photo updated!");
+
+            } catch (error) {
+                console.error("Photo upload failed:", error);
+                statusEl.textContent = 'Upload failed.';
+                showToast("Photo upload failed. Please try again.", true);
+            }
+        }
+
+        async function handleChangePassword(e) {
+            e.preventDefault();
+            const currentPassword = document.getElementById('current-password').value;
+            const newPassword = document.getElementById('new-password').value;
+
+            if (!App.currentUser) return;
+
+            const credential = EmailAuthProvider.credential(App.currentUser.email, currentPassword);
+
+            try {
+                await reauthenticateWithCredential(App.currentUser, credential);
+                await updatePassword(App.currentUser, newPassword);
+                showToast("Password updated successfully.");
+                e.target.reset(); // Clear the form
+            } catch (error) {
+                console.error("Password change failed:", error);
+                showToast(`Error: ${error.message}`, true);
+            }
+        }
+        
+        async function fetchAndRenderFamily() {
+            const container = document.getElementById('family-tree-container');
+            if (!container) return;
+
+            const familyLinks = App.userData.family || {};
+            const relationshipIds = Object.values(familyLinks).filter(id => id);
+
+            if (relationshipIds.length === 0) {
+                container.innerHTML = `<p class="text-gray-500">No family members linked yet. Use the "Add Member" button to build your family tree.</p>`;
+                return;
+            }
+            
+            // This is a simplified fetch. A more robust solution might use onSnapshot for real-time updates.
+            try {
+                const q = query(collection(App.db, "users"), where("sabhaId", "in", relationshipIds));
+                const querySnapshot = await getDocs(q);
+                
+                let html = '';
+                querySnapshot.forEach((doc) => {
+                    const member = doc.data();
+                    const relationship = Object.keys(familyLinks).find(key => familyLinks[key] === member.sabhaId) || 'member';
+                    const relationText = relationship.replace('Id', '').replace(/([A-Z])/g, ' $1').trim();
+
+                    html += `
+                        <div class="flex items-center justify-between p-3 bg-white rounded-md border">
+                            <div>
+                                <p class="font-semibold">${member.fullName}</p>
+                                <p class="text-sm text-gray-500 capitalize">${relationText}</p>
+                            </div>
+                            <p class="text-sm font-mono text-indigo-600">${member.sabhaId}</p>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html || `<p class="text-gray-500">Could not find details for linked family members.</p>`;
+
+            } catch(error) {
+                console.error("Error fetching family data: ", error);
+                container.innerHTML = `<p class="text-red-500">Error loading family data.</p>`
+            }
+        }
+
+        // --- Initialize the App ---
+        document.addEventListener('DOMContentLoaded', () => {
+            App.init();
+        });
+
+    </script>
 </body>
 </html>
-

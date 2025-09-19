@@ -20,9 +20,8 @@
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6; /* A light gray background */
+            background-color: #f3f4f6;
         }
-        /* Simple transition for view changes */
         .view-transition {
             animation: fadeIn 0.5s ease-in-out;
         }
@@ -30,278 +29,267 @@
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        /* Custom scrollbar for better aesthetics */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 10px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #555;
-        }
-        /* Styling for the digital ID card */
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        
         #digital-id-card {
             background: linear-gradient(135deg, #ffffff 0%, #eef2f3 100%);
             border: 1px solid #d1d5db;
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
             color: #1f2937;
         }
+
+        /* Modal styles */
+        .modal-backdrop {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            width: 90%;
+            max-width: 500px;
+        }
     </style>
 </head>
 <body class="antialiased text-gray-800">
 
-    <div id="app" class="min-h-screen flex items-center justify-center p-4">
-        <!-- App content will be rendered here by JavaScript -->
-    </div>
+    <div id="app" class="min-h-screen flex items-center justify-center p-4"></div>
     
-    <!-- Toast/Notification Element -->
-    <div id="toast" class="fixed top-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg transform translate-x-full transition-transform duration-300">
+    <div id="toast" class="fixed top-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg transform translate-x-full transition-transform duration-300 z-50">
         <p id="toast-message"></p>
     </div>
 
+    <div id="add-family-modal" class="modal-backdrop">
+        <div class="modal-content">
+            <h2 class="text-2xl font-bold mb-4">Add a Family Member</h2>
+            <form id="add-family-form" class="space-y-4">
+                <p class="text-sm text-gray-600">You can link an existing member or add a new child.</p>
+                <div>
+                    <label class="block text-sm font-medium">Relationship to You</label>
+                    <select name="role" required class="mt-1 w-full p-2 border rounded-md">
+                        <option value="Spouse">Spouse</option>
+                        <option value="Father">Father</option>
+                        <option value="Mother">Mother</option>
+                        <option value="Child">Child (New Registration)</option>
+                        <option value="Brother">Brother</option>
+                        <option value="Sister">Sister</option>
+                    </select>
+                </div>
+                <div id="linking-fields">
+                    <div>
+                        <label class="block text-sm font-medium">Their Sabha ID</label>
+                        <input type="text" name="sabhaId" class="mt-1 w-full p-2 border rounded-md" placeholder="e.g., 0001234">
+                    </div>
+                     <div>
+                        <label class="block text-sm font-medium">Their Aadhaar Number</label>
+                        <input type="text" name="aadhaar" pattern="\\d{12}" class="mt-1 w-full p-2 border rounded-md" placeholder="12-digit number">
+                    </div>
+                </div>
+                <div id="new-child-fields" class="hidden space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium">Child's Full Name</label>
+                        <input type="text" name="fullName" class="mt-1 w-full p-2 border rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">Child's Date of Birth</label>
+                        <input type="date" name="dob" class="mt-1 w-full p-2 border rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">Child's Gender</label>
+                         <select name="gender" class="mt-1 w-full p-2 border rounded-md">
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-4 mt-6">
+                    <button type="button" id="cancel-add-family" class="bg-gray-200 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-300">Cancel</button>
+                    <button type="submit" class="bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700">Add Member</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
-    <!-- Firebase and App Logic -->
     <script type="module">
-        // Import Firebase modules
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { 
-            getAuth, 
-            onAuthStateChanged, 
-            createUserWithEmailAndPassword, 
-            signInWithEmailAndPassword, 
-            signOut, 
-            sendPasswordResetEmail,
-            updatePassword,
-            reauthenticateWithCredential,
-            EmailAuthProvider
-        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { 
-            getFirestore, 
-            doc, 
-            setDoc, 
-            getDoc,
-            collection,
-            onSnapshot,
-            updateDoc,
-            query,
-            where,
-            getDocs
-        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { 
-            getStorage, 
-            ref, 
-            uploadBytes, 
-            getDownloadURL 
-        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+        import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, collection, updateDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 
-        // --- MOCK FIREBASE CONFIG (Provided by the environment) ---
-        // In a real environment, these variables are injected.
-        const __app_id = 'sabha-portal-prod';
-        const __firebase_config = JSON.stringify({
-            apiKey: "YOUR_API_KEY", // Replace with your actual Firebase config
-            authDomain: "your-project-id.firebaseapp.com",
-            projectId: "your-project-id",
-            storageBucket: "your-project-id.appspot.com",
-            messagingSenderId: "your-sender-id",
-            appId: "your-app-id"
-        });
+        const firebaseConfig = {
+            apiKey: "AIzaSyBsraiG11tJCu5CYRiQiqe3kaVJShh_cfI",
+            authDomain: "atmams-sabhaid-system.firebaseapp.com",
+            projectId: "atmams-sabhaid-system",
+            storageBucket: "atmams-sabhaid-system.appspot.com",
+            messagingSenderId: "187796742502",
+            appId: "1:187796742502:web:f6f808cb9d555b67e6a8a7",
+            measurementId: "G-0TV419DPH1"
+        };
         
-        // --- App State and Initialization ---
         const App = {
-            firebase: null,
-            auth: null,
-            db: null,
-            storage: null,
-            currentUser: null,
-            userData: null,
-            familyData: new Map(), // To store fetched family member data
+            firebase: null, auth: null, db: null, storage: null, functions: null, currentUser: null, userData: null, familyData: new Map(),
             
             init() {
                 try {
-                    const firebaseConfig = JSON.parse(__firebase_config);
                     this.firebase = initializeApp(firebaseConfig);
                     this.auth = getAuth(this.firebase);
                     this.db = getFirestore(this.firebase);
                     this.storage = getStorage(this.firebase);
+                    this.functions = getFunctions(this.firebase, 'asia-south1');
                     this.listenForAuthState();
                 } catch(error) {
                     console.error("Firebase initialization failed:", error);
-                    document.getElementById('app').innerHTML = `
-                        <div class="text-red-500 bg-red-100 p-4 rounded-lg">
-                            Error: Could not connect to the platform services. Please check your configuration.
-                        </div>
-                    `;
+                    document.getElementById('app').innerHTML = `<div class="text-red-500 bg-red-100 p-4 rounded-lg">Error: Could not connect to the platform services.</div>`;
                 }
             },
             
             listenForAuthState() {
                 onAuthStateChanged(this.auth, async (user) => {
+                    this.currentUser = user;
                     if (user) {
-                        this.currentUser = user;
                         await this.fetchUserData(user.uid);
-                        if (this.userData) {
-                            this.navigateTo('dashboard');
-                        } else {
-                            // This case might happen if Auth record exists but Firestore doc doesn't.
-                            console.error("User is authenticated but no data found in Firestore.");
-                            this.navigateTo('login');
-                        }
-                    } else {
-                        this.currentUser = null;
-                        this.userData = null;
-                        this.familyData.clear();
-                        this.navigateTo('login');
                     }
+                    this.navigateTo(user && this.userData ? 'dashboard' : 'login');
                 });
             },
             
             async fetchUserData(uid) {
-                const userDocRef = doc(this.db, "users", uid);
-                const docSnap = await getDoc(userDocRef);
-                if (docSnap.exists()) {
+                const q = query(collection(this.db, "members"), where("authUid", "==", uid));
+                const querySnapshot = await getDocs(q);
+                if (!querySnapshot.empty) {
+                    const docSnap = querySnapshot.docs[0];
                     this.userData = { id: docSnap.id, ...docSnap.data() };
                 } else {
-                    console.log("No such document for UID:", uid);
+                    console.log("No member document for auth UID:", uid);
                     this.userData = null;
                 }
             },
 
-            // --- Navigation ---
-            navigateTo(view) {
+            navigateTo(view, viewState = {}) {
                 const appContainer = document.getElementById('app');
-                appContainer.innerHTML = '<div class="text-center"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto"></div><p class="mt-2">Loading...</p></div>';
+                appContainer.innerHTML = `<div class="text-center"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto"></div><p class="mt-2">Loading...</p></div>`;
                 
-                // A short delay to allow the loading spinner to be visible
                 setTimeout(() => {
-                    appContainer.innerHTML = this.Views[view]();
-                    appContainer.firstChild.classList.add('view-transition');
-                    this.addEventListeners(view);
+                    appContainer.innerHTML = this.Views[view](viewState);
+                    if (appContainer.children[0]) {
+                        appContainer.children[0].classList.add('view-transition');
+                    }
+                    this.addEventListeners(view, viewState);
                 }, 200);
             },
             
-            // --- UI/View Management ---
-            Views: {
-                // ... All view rendering functions will go here ...
-            },
-            
-            // --- Event Listener Management ---
-            addEventListeners(view) {
-                // ... Event listeners for each view will be added here ...
-            }
+            Views: {},
+            addEventListeners(view, viewState) {},
         };
 
-        // --- VIEW RENDERERS ---
         App.Views.login = () => `
             <div class="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
-                <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">Sabha Portal Login</h1>
-                <p class="text-center text-gray-500 mb-6">Welcome back to your community.</p>
+                <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">Sabha Portal</h1>
+                <p class="text-center text-gray-500 mb-6">Welcome to your community portal.</p>
                 <form id="login-form">
-                    <div class="mb-4">
-                        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                        <input type="email" id="login-email" required class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                    </div>
-                    <div class="mb-6">
-                        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                        <input type="password" id="login-password" required class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                    </div>
-                    <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors">Sign In</button>
+                    <div class="mb-4"><label class="block text-sm font-medium text-gray-700 mb-1">Email</label><input type="email" id="login-email" required class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div>
+                    <div class="mb-6"><label class="block text-sm font-medium text-gray-700 mb-1">Password</label><input type="password" id="login-password" required class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div>
+                    <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition-colors">Sign In</button>
                 </form>
-                <div class="text-center mt-4">
-                    <a href="#" id="forgot-password-link" class="text-sm text-indigo-600 hover:underline">Forgot Password?</a>
-                </div>
-                <div class="text-center mt-4 pt-4 border-t">
-                    <p class="text-sm text-gray-600">Don't have an account? 
-                        <a href="#" id="go-to-register" class="font-medium text-indigo-600 hover:underline">Register Here</a>
-                    </p>
-                </div>
-            </div>
-        `;
-
-        App.Views.register = () => {
-            // A simplified registration form. The full logic for adding family members is complex and is represented here.
-            return `
-                <div class="w-full max-w-3xl bg-white p-8 rounded-xl shadow-lg">
-                    <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">New Member Registration</h1>
-                    <p class="text-center text-gray-500 mb-6">Create an account for yourself and your immediate family.</p>
-                    
-                    <form id="register-form" class="space-y-8">
-                        <!-- Personal Details -->
-                        <div class="p-6 border rounded-lg">
-                            <h2 class="text-xl font-semibold mb-4 border-b pb-2">Your Details (Registrar)</h2>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium">Full Name</label>
-                                    <input type="text" name="self_name" required class="mt-1 w-full p-2 border rounded-md">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium">Aadhaar Number (12 digits)</label>
-                                    <input type="text" name="self_aadhaar" required pattern="\\d{12}" title="Must be 12 digits" class="mt-1 w-full p-2 border rounded-md">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium">Date of Birth</label>
-                                    <input type="date" name="self_dob" required class="mt-1 w-full p-2 border rounded-md">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium">Email Address</label>
-                                    <input type="email" name="self_email" required class="mt-1 w-full p-2 border rounded-md">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium">Create Password</label>
-                                    <input type="password" name="self_password" required class="mt-1 w-full p-2 border rounded-md">
-                                </div>
-                            </div>
+                <div class="text-center mt-4"><a href="#" id="forgot-password-link" class="text-sm text-indigo-600 hover:underline">Forgot Password?</a></div>
+                <div class="text-center mt-4 pt-4 border-t"><p class="text-sm text-gray-600">First time here? <a href="#" id="go-to-register" class="font-medium text-indigo-600 hover:underline">Activate or Register</a></p></div>
+            </div>`;
+        
+        App.Views.register = () => `
+            <div class="w-full max-w-2xl bg-white p-8 rounded-xl shadow-lg">
+                <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">Join the Portal</h1>
+                <p class="text-center text-gray-500 mb-8">Activate your existing Sabha profile or register a new family.</p>
+                <div id="activation-section" class="space-y-6">
+                    <h2 class="text-xl font-semibold border-b pb-2">Activate Your Online Account</h2>
+                    <p class="text-sm text-gray-600">If you are already a Sabha member, find your profile to create an online login.</p>
+                    <form id="verify-member-form">
+                        <h3 class="font-medium mb-2">Find by Sabha ID</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label class="block text-sm">Your Sabha ID</label><input type="text" name="sabhaId" required class="mt-1 w-full p-2 border rounded-md" placeholder="e.g., 0001234"></div>
+                            <div><label class="block text-sm">Your Aadhaar Number</label><input type="text" name="aadhaar" required pattern="\\d{12}" class="mt-1 w-full p-2 border rounded-md" placeholder="12-digit number"></div>
                         </div>
-
-                        <!-- Spouse Details (Optional) -->
-                        <div class="p-6 border rounded-lg">
-                             <h2 class="text-xl font-semibold mb-4 border-b pb-2">Spouse's Details (Optional)</h2>
-                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium">Full Name</label>
-                                    <input type="text" name="spouse_name" class="mt-1 w-full p-2 border rounded-md">
-                                </div>
-                                 <div>
-                                    <label class="block text-sm font-medium">Aadhaar Number (12 digits)</label>
-                                    <input type="text" name="spouse_aadhaar" pattern="\\d{12}" class="mt-1 w-full p-2 border rounded-md">
-                                </div>
-                                 <div>
-                                    <label class="block text-sm font-medium">Date of Birth</label>
-                                    <input type="date" name="spouse_dob" class="mt-1 w-full p-2 border rounded-md">
-                                </div>
-                            </div>
+                        <button type="submit" class="mt-4 w-full md:w-auto bg-teal-600 text-white py-2 px-4 rounded-md hover:bg-teal-700">Verify & Activate</button>
+                    </form>
+                    <div class="text-center my-4 text-gray-500">OR</div>
+                    <form id="find-member-form">
+                        <h3 class="font-medium mb-2">Find by Personal Details</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label class="block text-sm">Full Name (as in records)</label><input type="text" name="fullName" required class="mt-1 w-full p-2 border rounded-md"></div>
+                            <div><label class="block text-sm">Aadhaar Number</label><input type="text" name="aadhaar" required pattern="\\d{12}" class="mt-1 w-full p-2 border rounded-md"></div>
+                            <div class="md:col-span-2"><label class="block text-sm">Date of Birth</label><input type="date" name="dob" required class="mt-1 w-full p-2 border rounded-md"></div>
                         </div>
-
-                        <!-- Account Holder Designation -->
-                        <div class="p-6 border rounded-lg bg-indigo-50">
-                            <h2 class="text-xl font-semibold mb-4">Primary Account Holder</h2>
-                            <p class="text-sm text-gray-600 mb-3">Select who will be the primary user for this online account. For example, a child can register on behalf of a parent and set the parent as the account holder.</p>
-                            <select name="primary_holder" class="w-full p-2 border rounded-md">
-                                <option value="self" selected>Myself (the person filling this form)</option>
-                                <option value="spouse">My Spouse</option>
-                                <!-- NOTE: Can be extended for parents if they are also added in this form -->
-                            </select>
-                        </div>
-                        
-                        <div class="flex justify-between items-center mt-8">
-                            <a href="#" id="go-to-login" class="text-sm text-indigo-600 hover:underline">&larr; Back to Login</a>
-                            <button type="submit" class="bg-indigo-600 text-white py-2 px-6 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors">
-                                Register Family
-                            </button>
-                        </div>
+                        <button type="submit" class="mt-4 w-full md:w-auto bg-teal-600 text-white py-2 px-4 rounded-md hover:bg-teal-700">Find My Profile</button>
                     </form>
                 </div>
-            `;
-        };
+                <div class="text-center mt-8 pt-8 border-t">
+                    <p class="text-sm text-gray-600">If you are not in the Sabha records: <a href="#" id="go-to-new-family" class="font-medium text-indigo-600 hover:underline">Register as a New Family &rarr;</a></p>
+                    <a href="#" id="go-to-login" class="block mt-4 text-sm text-gray-500 hover:underline">&larr; Back to Login</a>
+                </div>
+            </div>`;
 
+        App.Views.newFamilyRegistration = () => `
+            <div class="w-full max-w-3xl bg-white p-8 rounded-xl shadow-lg">
+                <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">New Family Registration</h1>
+                <p class="text-center text-gray-500 mb-6">Create a new profile for yourself and your family.</p>
+                <form id="new-family-form" class="space-y-8">
+                    <div class="p-6 border rounded-lg">
+                        <h2 class="text-xl font-semibold mb-4 border-b pb-2">Your Details (Head of Family)</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label class="block text-sm font-medium">Full Name</label><input type="text" name="fullName" required class="mt-1 w-full p-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium">Aadhaar (12 digits)</label><input type="text" name="aadhaar" required pattern="\\d{12}" class="mt-1 w-full p-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium">Date of Birth</label><input type="date" name="dob" required class="mt-1 w-full p-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium">Gender</label><select name="gender" required class="mt-1 w-full p-2 border rounded-md"><option value="Male">Male</option><option value="Female">Female</option></select></div>
+                            <div><label class="block text-sm font-medium">Email Address</label><input type="email" name="email" required class="mt-1 w-full p-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium">Create Password</label><input type="password" name="password" required class="mt-1 w-full p-2 border rounded-md"></div>
+                        </div>
+                    </div>
+                    <div class="p-6 border rounded-lg">
+                        <h2 class="text-xl font-semibold mb-4 border-b pb-2">Spouse's Details (Optional)</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label class="block text-sm font-medium">Full Name</label><input type="text" name="spouse_fullName" class="mt-1 w-full p-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium">Aadhaar (12 digits)</label><input type="text" name="spouse_aadhaar" pattern="\\d{12}" class="mt-1 w-full p-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium">Date of Birth</label><input type="date" name="spouse_dob" class="mt-1 w-full p-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium">Gender</label><select name="spouse_gender" class="mt-1 w-full p-2 border rounded-md"><option value="Female">Female</option><option value="Male">Male</option></select></div>
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center mt-8">
+                        <a href="#" id="back-to-register" class="text-sm text-indigo-600 hover:underline">&larr; Back</a>
+                        <button type="submit" class="bg-indigo-600 text-white py-2 px-6 rounded-md hover:bg-indigo-700">Register Family</button>
+                    </div>
+                </form>
+            </div>`;
+
+        App.Views.createOnlineAccount = ({ fullName, docId }) => `
+            <div class="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
+                <h1 class="text-2xl font-bold text-center text-gray-800">Welcome, ${fullName}!</h1>
+                <p class="text-center text-gray-500 mb-6">Create your password to finish activating your online account.</p>
+                <form id="create-account-form" data-doc-id="${docId}">
+                    <div class="mb-4"><label class="block text-sm font-medium">Email Address</label><input type="email" id="account-email" required class="mt-1 w-full p-2 border rounded-md"></div>
+                    <div class="mb-6"><label class="block text-sm font-medium">Create Password</label><input type="password" id="account-password" required class="mt-1 w-full p-2 border rounded-md"></div>
+                    <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700">Create Account</button>
+                </form>
+            </div>`;
+            
         App.Views.dashboard = () => {
             if (!App.userData) return `<p>Loading user data...</p>`;
             const { fullName, dob, sabhaId, profilePhotoUrl } = App.userData;
             const profileImage = profilePhotoUrl || 'https://placehold.co/128x128/e2e8f0/64748b?text=No+Photo';
+
+            const dobDate = dob ? new Date(dob) : null;
+            const displayDob = dobDate && !isNaN(dobDate) ? dobDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Not Available';
+            const cardDob = dobDate && !isNaN(dobDate) ? dobDate.toLocaleDateString('en-GB') : 'N/A';
 
             return `
             <div class="w-full max-w-6xl mx-auto bg-white p-4 sm:p-6 lg:p-8 rounded-xl shadow-lg">
@@ -310,13 +298,10 @@
                         <h1 class="text-3xl font-bold text-gray-800">Welcome, ${fullName}</h1>
                         <p class="text-gray-500">Your Sabha ID: <span class="font-semibold text-indigo-600">${sabhaId}</span></p>
                     </div>
-                    <button id="logout-btn" class="mt-4 sm:mt-0 bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600 transition-colors">Logout</button>
+                    <button id="logout-btn" class="mt-4 sm:mt-0 bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600">Logout</button>
                 </header>
-
                 <main class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <!-- Left Column: ID Card and Profile -->
                     <div class="lg:col-span-1 space-y-8">
-                        <!-- Profile Card -->
                         <div class="bg-gray-50 p-6 rounded-lg border">
                             <h2 class="text-xl font-semibold mb-4">My Profile</h2>
                             <div class="flex flex-col items-center text-center">
@@ -325,11 +310,9 @@
                                 <input type="file" id="photo-upload" class="hidden" accept="image/*">
                                 <p id="upload-status" class="text-sm mt-2"></p>
                                 <h3 class="text-2xl font-bold mt-4">${fullName}</h3>
-                                <p class="text-gray-600">Born on: ${new Date(dob).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                                <p class="text-gray-600">Born on: ${displayDob}</p>
                             </div>
                         </div>
-
-                        <!-- Digital ID Card -->
                         <div class="bg-gray-50 p-6 rounded-lg border">
                             <h2 class="text-xl font-semibold mb-4">Digital ID Card</h2>
                             <div id="digital-id-card" class="p-4 rounded-lg relative">
@@ -338,28 +321,24 @@
                                     <div>
                                         <h4 class="font-bold text-lg leading-tight">${fullName}</h4>
                                         <p class="text-sm">ID: <span class="font-mono">${sabhaId}</span></p>
-                                        <p class="text-sm">DOB: ${new Date(dob).toLocaleDate_String()}</p>
+                                        <p class="text-sm">DOB: ${cardDob}</p>
                                     </div>
                                 </div>
                                 <div id="qrcode-container" class="absolute bottom-2 right-2 bg-white p-1 rounded-md"></div>
                             </div>
-                            <button id="download-id-btn" class="mt-4 w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors">Download ID Card</button>
+                            <button id="download-id-btn" class="mt-4 w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700">Download ID Card</button>
                         </div>
                     </div>
-
-                    <!-- Right Column: Family and Settings -->
                     <div class="lg:col-span-2 space-y-8">
-                         <!-- Family Tree -->
                         <div class="bg-gray-50 p-6 rounded-lg border">
                             <div class="flex justify-between items-center mb-4">
-                                <h2 class="text-xl font-semibold">Family Members</h2>
-                                <button id="add-family-member-btn" class="bg-indigo-500 text-white py-1 px-3 rounded-md hover:bg-indigo-600 text-sm">+ Add Member</button>
+                                <h2 class="text-xl font-semibold">My Family</h2>
+                                <button id="add-family-member-btn" class="bg-indigo-500 text-white py-1 px-3 rounded-md hover:bg-indigo-600 text-sm">+ Add/Link Member</button>
                             </div>
                             <div id="family-tree-container" class="space-y-3">
                                 <p>Loading family details...</p>
                             </div>
                         </div>
-                        <!-- Account Settings -->
                         <div class="bg-gray-50 p-6 rounded-lg border">
                             <h2 class="text-xl font-semibold mb-4">Account Settings</h2>
                             <form id="change-password-form" class="space-y-4">
@@ -377,191 +356,133 @@
                         </div>
                     </div>
                 </main>
-            </div>
-            `;
+            </div>`;
         };
         
-        // --- EVENT LISTENERS ---
-        App.addEventListeners = (view) => {
-            const appContainer = document.getElementById('app');
-
+        App.addEventListeners = (view, viewState) => {
             if (view === 'login') {
-                const loginForm = document.getElementById('login-form');
-                loginForm.addEventListener('submit', handleLogin);
-                document.getElementById('go-to-register').addEventListener('click', (e) => {
-                    e.preventDefault();
-                    App.navigateTo('register');
-                });
-                document.getElementById('forgot-password-link').addEventListener('click', handleForgotPassword);
+                document.getElementById('login-form')?.addEventListener('submit', handleLogin);
+                document.getElementById('go-to-register')?.addEventListener('click', e => { e.preventDefault(); App.navigateTo('register'); });
+                document.getElementById('forgot-password-link')?.addEventListener('click', handleForgotPassword);
             }
-            
             if (view === 'register') {
-                 document.getElementById('register-form').addEventListener('submit', handleRegistration);
-                 document.getElementById('go-to-login').addEventListener('click', (e) => {
-                    e.preventDefault();
-                    App.navigateTo('login');
-                });
+                document.getElementById('verify-member-form')?.addEventListener('submit', handleVerifyMember);
+                document.getElementById('find-member-form')?.addEventListener('submit', handleFindMember);
+                document.getElementById('go-to-new-family')?.addEventListener('click', e => { e.preventDefault(); App.navigateTo('newFamilyRegistration'); });
+                document.getElementById('go-to-login')?.addEventListener('click', e => { e.preventDefault(); App.navigateTo('login'); });
             }
-
+             if (view === 'newFamilyRegistration') {
+                document.getElementById('new-family-form')?.addEventListener('submit', handleNewFamilyRegistration);
+                document.getElementById('back-to-register')?.addEventListener('click', e => { e.preventDefault(); App.navigateTo('register'); });
+            }
+            if(view === 'createOnlineAccount') {
+                document.getElementById('create-account-form')?.addEventListener('submit', handleCreateOnlineAccount);
+            }
             if (view === 'dashboard') {
-                document.getElementById('logout-btn').addEventListener('click', handleLogout);
-                document.getElementById('download-id-btn').addEventListener('click', handleDownloadId);
-                document.getElementById('photo-upload').addEventListener('change', handlePhotoUpload);
-                document.getElementById('change-password-form').addEventListener('submit', handleChangePassword);
-
-                // Generate QR Code
-                const qrcodeContainer = document.getElementById('qrcode-container');
-                if(qrcodeContainer) {
-                    qrcodeContainer.innerHTML = ''; // Clear previous QR
-                    new QRCode(qrcodeContainer, {
-                        text: App.userData.sabhaId,
-                        width: 64,
-                        height: 64,
-                        colorDark: "#000000",
-                        colorLight: "#ffffff",
-                        correctLevel: QRCode.CorrectLevel.H
-                    });
-                }
+                document.getElementById('logout-btn')?.addEventListener('click', handleLogout);
+                document.getElementById('download-id-btn')?.addEventListener('click', handleDownloadId);
+                document.getElementById('photo-upload')?.addEventListener('change', handlePhotoUpload);
+                document.getElementById('change-password-form')?.addEventListener('submit', handleChangePassword);
                 
-                // Fetch and display family tree
+                document.getElementById('add-family-member-btn')?.addEventListener('click', showAddFamilyModal);
+                document.getElementById('cancel-add-family')?.addEventListener('click', hideAddFamilyModal);
+                document.getElementById('add-family-form')?.addEventListener('submit', handleAddFamilyMember);
+                document.querySelector('#add-family-form select[name="role"]')?.addEventListener('change', toggleAddFamilyFields);
+
+                const qrcodeContainer = document.getElementById('qrcode-container');
+                if(qrcodeContainer && App.userData.sabhaId) {
+                    qrcodeContainer.innerHTML = '';
+                    new QRCode(qrcodeContainer, { text: App.userData.sabhaId, width: 64, height: 64 });
+                }
                 fetchAndRenderFamily();
             }
         };
-
-        // --- HANDLER FUNCTIONS ---
         
         function showToast(message, isError = false) {
             const toast = document.getElementById('toast');
             const toastMessage = document.getElementById('toast-message');
             toastMessage.textContent = message;
-            toast.className = `fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg transform transition-transform duration-300 ${isError ? 'bg-red-500' : 'bg-green-500'}`;
+            toast.className = `fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg transform transition-transform duration-300 z-50 ${isError ? 'bg-red-500' : 'bg-green-500'}`;
             toast.classList.remove('translate-x-full');
-            setTimeout(() => {
-                toast.classList.add('translate-x-full');
-            }, 3000);
+            setTimeout(() => { toast.classList.add('translate-x-full'); }, 4000);
         }
 
         async function handleLogin(e) {
             e.preventDefault();
             const email = document.getElementById('login-email').value;
             const password = document.getElementById('login-password').value;
-            try {
-                await signInWithEmailAndPassword(App.auth, email, password);
-                showToast("Login successful!");
-                // onAuthStateChanged will handle navigation
-            } catch (error) {
-                console.error("Login failed:", error);
-                showToast(`Login failed: ${error.message}`, true);
-            }
+            try { await signInWithEmailAndPassword(App.auth, email, password); showToast("Login successful!"); } catch (error) { showToast(`Login failed: ${error.message}`, true); }
         }
-        
-        async function handleRegistration(e) {
+
+        async function handleVerifyMember(e) {
             e.preventDefault();
-            showToast("Processing registration...", false);
-            const formData = new FormData(e.target);
-            const data = Object.fromEntries(formData.entries());
-            
-            const primaryHolder = data.primary_holder;
-            const primaryEmail = data.self_email;
-            const primaryPassword = data.self_password;
-
-            // This client-side code simulates the cloud function call.
-            // IN PRODUCTION: You would send `data` to a secure Cloud Function.
-            // The Cloud Function would:
-            // 1. Validate all data (Aadhaar uniqueness, etc.).
-            // 2. Create the Auth user for the primary holder.
-            // 3. Generate unique, sequential 7-digit Sabha IDs for all new members. This needs an atomic counter in Firestore.
-            // 4. Create Firestore documents for each person in the `users` collection.
-            // 5. Link the family members (e.g., add spouseId to each other's documents).
-            // 6. Return a success or error message.
-
+            const { sabhaId, aadhaar } = Object.fromEntries(new FormData(e.target));
+            showToast("Verifying details...");
             try {
-                // --- Start of Simulated Cloud Function Logic ---
-                // 1. Create Auth User
-                const userCredential = await createUserWithEmailAndPassword(App.auth, primaryEmail, primaryPassword);
-                const primaryUid = userCredential.user.uid;
+                const verifyMemberById = httpsCallable(App.functions, 'verifyMemberById');
+                const result = await verifyMemberById({ sabhaId, aadhaar });
+                if (result.data.success) {
+                    App.navigateTo('createOnlineAccount', { fullName: result.data.fullName, docId: result.data.docId });
+                } else { showToast(result.data.message, true); }
+            } catch (error) { showToast(`Error: ${error.message}`, true); }
+        }
 
-                // 2. Generate Sabha IDs (mocked)
-                const selfSabhaId = '000' + Math.floor(1000 + Math.random() * 9000);
-                let spouseSabhaId = null;
+        async function handleFindMember(e) {
+            e.preventDefault();
+            const { fullName, aadhaar, dob } = Object.fromEntries(new FormData(e.target));
+            showToast("Searching for your profile...");
+            try {
+                const findMemberByName = httpsCallable(App.functions, 'findMemberByName');
+                const result = await findMemberByName({ fullName, aadhaar, dob });
+                if (result.data.success) {
+                     App.navigateTo('createOnlineAccount', { fullName: result.data.fullName, docId: result.data.docId });
+                } else { showToast(result.data.message, true); }
+            } catch (error) { showToast(`Error: ${error.message}`, true); }
+        }
 
-                // 3. Create Firestore doc for self
-                const selfData = {
-                    sabhaId: selfSabhaId,
-                    fullName: data.self_name,
-                    aadhaar: data.self_aadhaar,
-                    dob: data.self_dob,
-                    email: data.self_email,
-                    profilePhotoUrl: null,
-                    family: {}
-                };
-                
-                // 4. Handle spouse if provided
-                if (data.spouse_name && data.spouse_aadhaar && data.spouse_dob) {
-                    spouseSabhaId = '000' + Math.floor(1000 + Math.random() * 9000);
-                    const spouseUid = "spouse_" + Date.now(); // Not a real auth user unless they register
-                    const spouseData = {
-                        sabhaId: spouseSabhaId,
-                        fullName: data.spouse_name,
-                        aadhaar: data.spouse_aadhaar,
-                        dob: data.spouse_dob,
-                        email: null,
-                        profilePhotoUrl: null,
-                        family: { spouseId: selfSabhaId }
-                    };
-                     await setDoc(doc(App.db, "users", spouseUid), spouseData);
-                     selfData.family.spouseId = spouseSabhaId;
-                }
-
-                // Determine which Firestore document gets the primary UID
-                let primaryUserDocRef;
-                if (primaryHolder === 'self') {
-                    primaryUserDocRef = doc(App.db, "users", primaryUid);
-                } else if (primaryHolder === 'spouse' && spouseSabhaId) {
-                    // This logic is complex. For now, we assume 'self' is the primary holder for simplicity.
-                    // A real implementation would need to handle creating the auth user for the spouse's details.
-                    primaryUserDocRef = doc(App.db, "users", primaryUid);
-                } else {
-                     primaryUserDocRef = doc(App.db, "users", primaryUid);
-                }
-
-                await setDoc(primaryUserDocRef, selfData);
-
-                // --- End of Simulated Cloud Function Logic ---
-
-                showToast("Registration successful! Please log in.");
-                App.navigateTo('login');
-
-            } catch (error) {
-                console.error("Registration failed:", error);
-                showToast(`Registration failed: ${error.message}`, true);
-            }
+        async function handleCreateOnlineAccount(e) {
+            e.preventDefault();
+            const { docId } = e.target.dataset;
+            const email = document.getElementById('account-email').value;
+            const password = document.getElementById('account-password').value;
+            showToast("Creating your account...");
+            try {
+                const createAccountForMember = httpsCallable(App.functions, 'createAccountForMember');
+                const result = await createAccountForMember({ docId, email, password });
+                if (result.data.success) {
+                    showToast("Account created! Please log in.");
+                    App.navigateTo('login');
+                } else { showToast(result.data.message, true); }
+            } catch (error) { showToast(`Error: ${error.message}`, true); }
         }
         
-        async function handleLogout() {
-            await signOut(App.auth);
-            showToast("You have been logged out.");
-            App.navigateTo('login');
+        async function handleNewFamilyRegistration(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const familyData = Object.fromEntries(formData.entries());
+            showToast("Registering new family...");
+            try {
+                const registerNewFamily = httpsCallable(App.functions, 'registerNewFamily');
+                const result = await registerNewFamily({ familyData });
+                 if (result.data.success) {
+                    showToast("Registration successful! Please log in.");
+                    App.navigateTo('login');
+                } else { showToast(result.data.message, true); }
+            } catch (error) {
+                 showToast(`Error: ${error.message}`, true);
+            }
         }
 
+        async function handleLogout() { await signOut(App.auth); showToast("You have been logged out."); }
         async function handleForgotPassword(e) {
             e.preventDefault();
-            const email = prompt("Please enter your email address to receive a password reset link:");
-            if (email) {
-                try {
-                    await sendPasswordResetEmail(App.auth, email);
-                    showToast("Password reset email sent. Check your inbox.");
-                } catch (error) {
-                    console.error("Password reset failed:", error);
-                    showToast(`Error: ${error.message}`, true);
-                }
-            }
+            const email = prompt("Please enter your email for a password reset link:");
+            if (email) { try { await sendPasswordResetEmail(App.auth, email); showToast("Password reset email sent."); } catch (error) { showToast(`Error: ${error.message}`, true); } }
         }
 
         function handleDownloadId() {
-            const idCardElement = document.getElementById('digital-id-card');
             showToast("Generating ID card image...");
-            html2canvas(idCardElement, { scale: 3 }).then(canvas => { // Increase scale for better quality
+            html2canvas(document.getElementById('digital-id-card'), { scale: 3 }).then(canvas => {
                 const link = document.createElement('a');
                 link.download = `sabha-id-${App.userData.sabhaId}.png`;
                 link.href = canvas.toDataURL();
@@ -571,34 +492,20 @@
         
         async function handlePhotoUpload(e) {
             const file = e.target.files[0];
-            if (!file) return;
-
-            const statusEl = document.getElementById('upload-status');
-            statusEl.textContent = 'Uploading...';
-            
+            if (!file || !App.userData || !App.currentUser) return;
+            document.getElementById('upload-status').textContent = 'Uploading...';
             const storageRef = ref(App.storage, `profilePhotos/${App.currentUser.uid}/${file.name}`);
-
             try {
                 const snapshot = await uploadBytes(storageRef, file);
                 const downloadURL = await getDownloadURL(snapshot.ref);
-
-                // Update Firestore
-                const userDocRef = doc(App.db, "users", App.currentUser.uid);
-                await updateDoc(userDocRef, {
-                    profilePhotoUrl: downloadURL
-                });
-
-                // Update local state and UI
+                await updateDoc(doc(App.db, "members", App.userData.id), { profilePhotoUrl: downloadURL });
                 App.userData.profilePhotoUrl = downloadURL;
-                App.navigateTo('dashboard'); // Re-render to show new photo
-
-                statusEl.textContent = '';
+                App.navigateTo('dashboard');
                 showToast("Profile photo updated!");
-
             } catch (error) {
-                console.error("Photo upload failed:", error);
-                statusEl.textContent = 'Upload failed.';
-                showToast("Photo upload failed. Please try again.", true);
+                document.getElementById('upload-status').textContent = 'Upload failed.';
+                showToast("Photo upload failed. Check storage rules.", true);
+                console.error("Upload error:", error);
             }
         }
 
@@ -606,69 +513,81 @@
             e.preventDefault();
             const currentPassword = document.getElementById('current-password').value;
             const newPassword = document.getElementById('new-password').value;
-
-            if (!App.currentUser) return;
-
             const credential = EmailAuthProvider.credential(App.currentUser.email, currentPassword);
-
             try {
                 await reauthenticateWithCredential(App.currentUser, credential);
                 await updatePassword(App.currentUser, newPassword);
                 showToast("Password updated successfully.");
-                e.target.reset(); // Clear the form
-            } catch (error) {
-                console.error("Password change failed:", error);
-                showToast(`Error: ${error.message}`, true);
-            }
+                e.target.reset();
+            } catch (error) { showToast(`Error: ${error.message}`, true); }
         }
         
         async function fetchAndRenderFamily() {
             const container = document.getElementById('family-tree-container');
-            if (!container) return;
-
-            const familyLinks = App.userData.family || {};
-            const relationshipIds = Object.values(familyLinks).filter(id => id);
-
-            if (relationshipIds.length === 0) {
-                container.innerHTML = `<p class="text-gray-500">No family members linked yet. Use the "Add Member" button to build your family tree.</p>`;
-                return;
-            }
-            
-            // This is a simplified fetch. A more robust solution might use onSnapshot for real-time updates.
+            if (!container || !App.userData) return;
+            const { spouseId, fatherId, motherId, childrenIds = [] } = App.userData;
+            const memberIds = [spouseId, fatherId, motherId, ...childrenIds].filter(Boolean);
+            if (memberIds.length === 0) { container.innerHTML = `<p class="text-gray-500">No family members linked yet.</p>`; return; }
             try {
-                const q = query(collection(App.db, "users"), where("sabhaId", "in", relationshipIds));
-                const querySnapshot = await getDocs(q);
-                
+                const memberDocs = await Promise.all(memberIds.map(id => getDoc(doc(App.db, "members", id))));
                 let html = '';
-                querySnapshot.forEach((doc) => {
-                    const member = doc.data();
-                    const relationship = Object.keys(familyLinks).find(key => familyLinks[key] === member.sabhaId) || 'member';
-                    const relationText = relationship.replace('Id', '').replace(/([A-Z])/g, ' $1').trim();
-
-                    html += `
-                        <div class="flex items-center justify-between p-3 bg-white rounded-md border">
-                            <div>
-                                <p class="font-semibold">${member.fullName}</p>
-                                <p class="text-sm text-gray-500 capitalize">${relationText}</p>
-                            </div>
-                            <p class="text-sm font-mono text-indigo-600">${member.sabhaId}</p>
-                        </div>
-                    `;
+                memberDocs.forEach(docSnap => {
+                    if (docSnap.exists()) {
+                        const member = docSnap.data();
+                        let relationship = 'Member';
+                        if (docSnap.id === spouseId) relationship = 'Spouse';
+                        if (docSnap.id === fatherId) relationship = 'Father';
+                        if (docSnap.id === motherId) relationship = 'Mother';
+                        if (childrenIds.includes(docSnap.id)) relationship = 'Child';
+                        html += `<div class="flex items-center justify-between p-3 bg-white rounded-md border"><div><p class="font-semibold">${member.fullName}</p><p class="text-sm text-gray-500 capitalize">${relationship}</p></div><p class="text-sm font-mono text-indigo-600">${member.sabhaId}</p></div>`;
+                    }
                 });
-                
-                container.innerHTML = html || `<p class="text-gray-500">Could not find details for linked family members.</p>`;
-
+                container.innerHTML = html || `<p class="text-gray-500">Could not find member details.</p>`;
             } catch(error) {
                 console.error("Error fetching family data: ", error);
                 container.innerHTML = `<p class="text-red-500">Error loading family data.</p>`
             }
         }
 
-        // --- Initialize the App ---
-        document.addEventListener('DOMContentLoaded', () => {
-            App.init();
-        });
+        function showAddFamilyModal() { document.getElementById('add-family-modal').style.display = 'flex'; }
+        function hideAddFamilyModal() { document.getElementById('add-family-modal').style.display = 'none'; }
+        
+        function toggleAddFamilyFields(e) {
+            const role = e.target.value;
+            const linkingFields = document.getElementById('linking-fields');
+            const newChildFields = document.getElementById('new-child-fields');
+            const linkInputs = linkingFields.querySelectorAll('input');
+            const childInputs = newChildFields.querySelectorAll('input, select');
+            if (role === 'Child') {
+                linkingFields.classList.add('hidden');
+                newChildFields.classList.remove('hidden');
+                childInputs.forEach(i => i.required = true);
+                linkInputs.forEach(i => { i.required = false; i.value = ''; });
+            } else {
+                linkingFields.classList.remove('hidden');
+                newChildFields.classList.add('hidden');
+                linkInputs.forEach(i => i.required = true);
+                childInputs.forEach(i => { i.required = false; i.value = ''; });
+            }
+        }
 
+        async function handleAddFamilyMember(e) {
+            e.preventDefault();
+            const newMemberDetails = Object.fromEntries(new FormData(e.target).entries());
+            showToast("Processing request...");
+            try {
+                const linkOrCreateFamilyMember = httpsCallable(App.functions, 'linkOrCreateFamilyMember');
+                const result = await linkOrCreateFamilyMember({ newMemberDetails, currentUserDocId: App.userData.id });
+                if (result.data.success) {
+                    showToast(result.data.message);
+                    hideAddFamilyModal();
+                    await App.fetchUserData(App.currentUser.uid);
+                    fetchAndRenderFamily();
+                } else { showToast(result.data.message || "An error occurred.", true); }
+            } catch (error) { showToast(`Error: ${error.message}`, true); }
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => { App.init(); });
     </script>
 </body>
 </html>

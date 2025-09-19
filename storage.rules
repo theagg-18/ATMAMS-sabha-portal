@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service firebase.storage {
+match /b/{bucket}/o {
+// Match any file path within the 'profilePhotos' directory.
+// The {userId} wildcard captures the user's authentication UID.
+match /profilePhotos/{userId}/{allPaths=**} {
+
+  // Allow read access to anyone who is logged in.
+  // This is useful if you want to display profile photos of family members.
+  allow read: if request.auth != null;
+  
+  // Allow write (create, update, delete) access only if the user's
+  // authenticated UID matches the {userId} in the file path.
+  // This ensures users can only upload photos to their own folder.
+  allow write: if request.auth.uid == userId;
+}
+
+}
+}

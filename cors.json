@@ -1,0 +1,12 @@
+[
+  {
+    "origin": ["https://atmams-sabhaid-system.web.app"],
+    "method": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "Authorization"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
+

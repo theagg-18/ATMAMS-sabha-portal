@@ -1,210 +1,226 @@
-// Version: 2.0.1
-const {onCall} = require("firebase-functions/v2/https");
+// Version: 2.2.0
+const {onCall, HttpsError} = require("firebase-functions/v2/https");
 const {setGlobalOptions} = require("firebase-functions/v2/options");
 const {initializeApp} = require("firebase-admin/app");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
+const {getAuth} = require("firebase-admin/auth");
 
-// Set the region for all functions in this file
 setGlobalOptions({region: "asia-south1"});
 initializeApp();
+const db = getFirestore();
+const auth = getAuth();
 
 /**
- * Verifies a member's existence based on Sabha ID and Aadhaar number.
+ * Creates a new family from scratch, including the primary user (Head of Family)
+ * and an optional spouse.
  */
+exports.registerNewFamily = onCall(async (request) => {
+  const {familyData} = request.data;
+  if (!familyData || !familyData.email || !familyData.password) {
+    throw new HttpsError("invalid-argument", "Missing essential user data.");
+  }
+
+  // 1. Check if Aadhaar already exists to prevent duplicates
+  const membersRef = db.collection("members");
+  const existingAadhaarQuery = await membersRef
+      .where("aadhaar", "==", familyData.aadhaar).limit(1).get();
+  if (!existingAadhaarQuery.empty) {
+    throw new HttpsError("already-exists",
+        "A member with this Aadhaar number is already registered.");
+  }
+
+  // Use a transaction to ensure atomic operations for counter and writes
+  return db.runTransaction(async (transaction) => {
+    // 2. Get a new unique Sabha ID for the primary user
+    const counterRef = db.collection("counters").doc("memberCounter");
+    const counterDoc = await transaction.get(counterRef);
+    const primaryId = counterDoc.exists ? counterDoc.data().currentId + 1 : 1;
+    const primarySabhaId = String(primaryId).padStart(7, "0");
+
+    // 3. Create the Firebase Auth user
+    const userRecord = await auth.createUser({
+      email: familyData.email,
+      password: familyData.password,
+      displayName: familyData.fullName,
+    });
+
+    // 4. Prepare primary member data
+    const primaryMemberRef = membersRef.doc(); // Auto-generate a document ID
+    const primaryMemberData = {
+      sabhaId: primarySabhaId,
+      familyId: primaryMemberRef.id, // The first member's doc ID is the family ID
+      authUid: userRecord.uid,
+      fullName: familyData.fullName,
+      aadhaar: familyData.aadhaar,
+      dob: familyData.dob,
+      gender: familyData.gender,
+      email: familyData.email,
+      profilePhotoUrl: null,
+      createdAt: FieldValue.serverTimestamp(),
+    };
+
+    // 5. Handle spouse if details are provided
+    if (familyData.spouse_fullName && familyData.spouse_aadhaar) {
+      const spouseId = primaryId + 1;
+      const spouseSabhaId = String(spouseId).padStart(7, "0");
+
+      const spouseMemberRef = membersRef.doc();
+      const spouseMemberData = {
+        sabhaId: spouseSabhaId,
+        familyId: primaryMemberRef.id, // Same family ID
+        fullName: familyData.spouse_fullName,
+        aadhaar: familyData.spouse_aadhaar,
+        dob: familyData.spouse_dob,
+        gender: familyData.spouse_gender,
+        createdAt: FieldValue.serverTimestamp(),
+        spouseId: primaryMemberRef.id, // Link to primary member
+      };
+      primaryMemberData.spouseId = spouseMemberRef.id; // Link back to spouse
+      transaction.set(spouseMemberRef, spouseMemberData);
+      transaction.set(counterRef, {currentId: spouseId}); // Update counter
+    } else {
+      transaction.set(counterRef, {currentId: primaryId}); // Update counter
+    }
+
+    transaction.set(primaryMemberRef, primaryMemberData);
+    return {success: true};
+  });
+});
+
+
+exports.createAccountForMember = onCall(async (request) => {
+  const {docId, email, password} = request.data;
+  if (!docId || !email || !password) {
+    throw new HttpsError("invalid-argument", "Missing required fields.");
+  }
+
+  try {
+    const userRecord = await auth.createUser({email, password});
+    const memberRef = db.collection("members").doc(docId);
+    await memberRef.update({authUid: userRecord.uid, email: email});
+    return {success: true, uid: userRecord.uid};
+  } catch (error) {
+    if (error.code === "auth/email-already-exists") {
+      throw new HttpsError("already-exists", "This email is already in use.");
+    }
+    throw new HttpsError("internal", "Error creating account.");
+  }
+});
+
 exports.verifyMemberById = onCall(async (request) => {
   const {sabhaId, aadhaar} = request.data;
   if (!sabhaId || !aadhaar || aadhaar.length !== 12) {
-    return {success: false, message: "Invalid input provided."};
+    throw new HttpsError("invalid-argument", "Invalid input provided.");
   }
-  const db = getFirestore();
-  const membersRef = db.collection("members");
-  const snapshot = await membersRef
+  const snapshot = await db.collection("members")
       .where("sabhaId", "==", sabhaId)
       .where("aadhaar", "==", aadhaar)
-      .limit(1)
-      .get();
+      .limit(1).get();
   if (snapshot.empty) {
-    return {
-      success: false,
-      message: "Details not found. Please check your Sabha ID and Aadhaar.",
-    };
+    return {success: false, message: "Details not found."};
   }
   const memberDoc = snapshot.docs[0];
-  const memberData = memberDoc.data();
-  if (memberData.authUid) {
-    return {
-      success: false,
-      message: "An online account already exists. Please use the Login page.",
-    };
+  if (memberDoc.data().authUid) {
+    return {success: false, message: "An online account already exists."};
   }
-  return {
-    success: true,
-    fullName: memberData.fullName,
-    docId: memberDoc.id,
-  };
+  return {success: true, fullName: memberDoc.data().fullName, docId: memberDoc.id};
 });
 
-/**
- * Finds a member's existence based on Full Name, Aadhaar, and Date of Birth.
- */
 exports.findMemberByName = onCall(async (request) => {
   const {fullName, aadhaar, dob} = request.data;
-  if (!fullName || !aadhaar || !dob || aadhaar.length !== 12) {
-    return {success: false, message: "Invalid input provided."};
+  if (!fullName || !aadhaar || !dob) {
+    throw new HttpsError("invalid-argument", "Invalid input provided.");
   }
-  const db = getFirestore();
-  const membersRef = db.collection("members");
-  const snapshot = await membersRef
+  const snapshot = await db.collection("members")
       .where("fullName", "==", fullName)
       .where("aadhaar", "==", aadhaar)
       .where("dob", "==", dob)
-      .limit(1)
-      .get();
+      .limit(1).get();
   if (snapshot.empty) {
-    return {
-      success: false,
-      message: "No profile found with those details.",
-    };
+    return {success: false, message: "No profile found."};
   }
   const memberDoc = snapshot.docs[0];
-  const memberData = memberDoc.data();
-  if (memberData.authUid) {
-    return {
-      success: false,
-      message: "An online account already exists. Please use the Login page.",
-    };
+  if (memberDoc.data().authUid) {
+    return {success: false, message: "An online account already exists."};
   }
-  return {
-    success: true,
-    fullName: memberData.fullName,
-    sabhaId: memberData.sabhaId,
-    docId: memberDoc.id,
-  };
+  return {success: true, fullName: memberDoc.data().fullName, docId: memberDoc.id};
 });
 
-
-/**
- * Adds a new family member. If they already exist, links them.
- */
 exports.linkOrCreateFamilyMember = onCall(async (request) => {
-  const functions = require("firebase-functions");
-  const admin = require("firebase-admin");
-  const {newMemberDetails, currentUserAuthUid} = request.data;
-
-  if (!newMemberDetails || !currentUserAuthUid) {
-    throw new functions.https.HttpsError("invalid-argument", "Invalid data.");
+  const {newMemberDetails, currentUserDocId} = request.data;
+  if (!newMemberDetails || !currentUserDocId) {
+    throw new HttpsError("invalid-argument", "Invalid data.");
   }
 
-  const db = admin.firestore();
   const membersRef = db.collection("members");
-  const currentUserRef = membersRef.doc(currentUserAuthUid);
+  const currentUserRef = membersRef.doc(currentUserDocId);
   const currentUserDoc = await currentUserRef.get();
-
   if (!currentUserDoc.exists) {
-    throw new functions.https.HttpsError("not-found", "Current user not found.");
+    throw new HttpsError("not-found", "Current user not found.");
   }
   const currentUserData = currentUserDoc.data();
-  const currentUserFamilyId = currentUserData.familyId;
 
-  let existingMemberQuery;
-  if (newMemberDetails.aadhaar) {
-    existingMemberQuery = await membersRef.where("aadhaar", "==", newMemberDetails.aadhaar).limit(1).get();
-  } else if (newMemberDetails.sabhaId) {
-    existingMemberQuery = await membersRef.where("sabhaId", "==", newMemberDetails.sabhaId).limit(1).get();
-  }
+  // Case 2: Adding a new child
+  if (newMemberDetails.role === "Child") {
+    return db.runTransaction(async (transaction) => {
+        const counterRef = db.collection("counters").doc("memberCounter");
+        const counterDoc = await transaction.get(counterRef);
+        const newId = counterDoc.exists() ? counterDoc.data().currentId + 1 : 1;
+        const newSabhaId = String(newId).padStart(7, "0");
 
-  if (existingMemberQuery && !existingMemberQuery.empty) {
-    const existingMemberDoc = existingMemberQuery.docs[0];
-    const existingMemberRef = existingMemberDoc.ref;
-    const existingMemberFamilyId = existingMemberDoc.data().familyId;
-    const batch = db.batch();
-    const relation = newMemberDetails.role;
-
-    if (relation === "Spouse") {
-      batch.update(currentUserRef, {spouseId: existingMemberDoc.id});
-      batch.update(existingMemberRef, {spouseId: currentUserAuthUid});
-    } else if (relation === "Father") {
-      batch.update(currentUserRef, {fatherId: existingMemberDoc.id, fatherName: existingMemberDoc.data().fullName});
-      batch.update(existingMemberRef, {childrenIds: FieldValue.arrayUnion(currentUserAuthUid)});
-    } else if (relation === "Mother") {
-      batch.update(currentUserRef, {motherId: existingMemberDoc.id, motherName: existingMemberDoc.data().fullName});
-      batch.update(existingMemberRef, {childrenIds: FieldValue.arrayUnion(currentUserAuthUid)});
-    } else if (relation === "Brother" || relation === "Sister") {
-      batch.update(existingMemberRef, {fatherId: currentUserData.fatherId || null, motherId: currentUserData.motherId || null});
-      if (currentUserData.fatherId) batch.update(membersRef.doc(currentUserData.fatherId), {childrenIds: FieldValue.arrayUnion(currentUserAuthUid, existingMemberDoc.id)});
-      if (currentUserData.motherId) batch.update(membersRef.doc(currentUserData.motherId), {childrenIds: FieldValue.arrayUnion(currentUserAuthUid, existingMemberDoc.id)});
-    }
-
-    if (currentUserFamilyId !== existingMemberFamilyId) {
-      const membersToMergeQuery = await membersRef.where("familyId", "==", existingMemberFamilyId).get();
-      membersToMergeQuery.forEach((doc) => batch.update(doc.ref, {familyId: currentUserFamilyId}));
-    }
-
-    await batch.commit();
-    return {success: true, message: "Existing member successfully linked."};
-  } else if (newMemberDetails.role === "Child") {
-    const counterRef = db.collection("counters").doc("memberCounter");
-    let newSabhaId;
-    await db.runTransaction(async (transaction) => {
-      const counterDoc = await transaction.get(counterRef);
-      const newId = counterDoc.exists() ? counterDoc.data().currentId + 1 : 1;
-      newSabhaId = String(newId).padStart(7, "0");
-      transaction.set(counterRef, {currentId: newId}, {merge: true});
+        const newMemberRef = membersRef.doc();
+        const newMemberData = {
+            fullName: newMemberDetails.fullName,
+            dob: newMemberDetails.dob,
+            gender: newMemberDetails.gender,
+            sabhaId: newSabhaId,
+            familyId: currentUserData.familyId,
+            registeredBy: currentUserDocId,
+            createdAt: FieldValue.serverTimestamp(),
+            fatherId: currentUserData.gender === "Male" ? currentUserDocId : (currentUserData.spouseId || null),
+            motherId: currentUserData.gender === "Female" ? currentUserDocId : (currentUserData.spouseId || null)
+        };
+        transaction.set(newMemberRef, newMemberData);
+        transaction.update(currentUserRef, { childrenIds: FieldValue.arrayUnion(newMemberRef.id) });
+        if(currentUserData.spouseId) {
+            transaction.update(membersRef.doc(currentUserData.spouseId), { childrenIds: FieldValue.arrayUnion(newMemberRef.id) });
+        }
+        transaction.set(counterRef, {currentId: newId}, {merge: true});
+        return {success: true, message: "New child successfully added."};
     });
-    const newMemberData = {...newMemberDetails, sabhaId: newSabhaId, familyId: currentUserFamilyId, registeredBy: currentUserAuthUid, createdAt: new Date()};
-    const newMemberRef = await membersRef.add(newMemberData);
-    const batch = db.batch();
-    batch.update(currentUserRef, {childrenIds: FieldValue.arrayUnion(newMemberRef.id)});
-    if (currentUserData.gender === "Male") batch.update(newMemberRef, {fatherId: currentUserAuthUid});
-    else if (currentUserData.gender === "Female") batch.update(newMemberRef, {motherId: currentUserAuthUid});
-    await batch.commit();
-    return {success: true, message: "New child successfully added."};
-  } else {
-    throw new functions.https.HttpsError("not-found", "Could not find a registered member to link.");
   }
+  
+  // Case 1: Linking an existing member
+  const { sabhaId, aadhaar, role } = newMemberDetails;
+  if (!sabhaId || !aadhaar) {
+      throw new HttpsError("invalid-argument", "Sabha ID and Aadhaar are required to link an existing member.");
+  }
+  const existingMemberQuery = await membersRef.where("sabhaId", "==", sabhaId).where("aadhaar", "==", aadhaar).limit(1).get();
+
+  if (existingMemberQuery.empty) {
+      throw new HttpsError("not-found", "Could not find a registered member with those details.");
+  }
+
+  const existingMemberDoc = existingMemberQuery.docs[0];
+  const batch = db.batch();
+
+  if (role === "Spouse") {
+      batch.update(currentUserRef, { spouseId: existingMemberDoc.id });
+      batch.update(existingMemberDoc.ref, { spouseId: currentUserDocId });
+  } else if (role === "Father") {
+      batch.update(currentUserRef, { fatherId: existingMemberDoc.id });
+      batch.update(existingMemberDoc.ref, { childrenIds: FieldValue.arrayUnion(currentUserDocId) });
+  } else if (role === "Mother") {
+      batch.update(currentUserRef, { motherId: existingMemberDoc.id });
+      batch.update(existingMemberDoc.ref, { childrenIds: FieldValue.arrayUnion(currentUserDocId) });
+  } else if (role === "Brother" || role === "Sister") {
+      // Logic for siblings can be complex, for now we just establish the parent links
+      batch.update(existingMemberDoc.ref, {
+        fatherId: currentUserData.fatherId || null,
+        motherId: currentUserData.motherId || null,
+      });
+  }
+
+  await batch.commit();
+  return {success: true, message: "Existing member successfully linked."};
 });
-
-
-/**
- * Links parents during initial registration if their details are provided.
- */
-exports.linkInitialParents = onCall(async (request) => {
-    const admin = require("firebase-admin");
-    const { userId } = request.data;
-    const db = admin.firestore();
-    const userRef = db.collection("members").doc(userId);
-    const userDoc = await userRef.get();
-    if (!userDoc.exists) return {success: false, message: "User not found."};
-
-    const userData = userDoc.data();
-    const batch = db.batch();
-
-    // Link Father if details were provided during registration
-    if (userData.fatherLinkingAadhaar && userData.fatherLinkingSabhaId) {
-        const fatherQuery = await db.collection("members")
-            .where("sabhaId", "==", userData.fatherLinkingSabhaId)
-            .where("aadhaar", "==", userData.fatherLinkingAadhaar)
-            .limit(1).get();
-        if (!fatherQuery.empty) {
-            const fatherDoc = fatherQuery.docs[0];
-            batch.update(userRef, { fatherId: fatherDoc.id });
-            batch.update(fatherDoc.ref, { childrenIds: FieldValue.arrayUnion(userId) });
-        }
-    }
-    // Link Mother if details were provided
-    if (userData.motherLinkingAadhaar && userData.motherLinkingSabhaId) {
-        const motherQuery = await db.collection("members")
-            .where("sabhaId", "==", userData.motherLinkingSabhaId)
-            .where("aadhaar", "==", userData.motherLinkingAadhaar)
-            .limit(1).get();
-        if (!motherQuery.empty) {
-            const motherDoc = motherQuery.docs[0];
-            batch.update(userRef, { motherId: motherDoc.id });
-            batch.update(motherDoc.ref, { childrenIds: FieldValue.arrayUnion(userId) });
-        }
-    }
-
-    await batch.commit();
-    return {success: true, message: "Parents linked successfully."};
-});
-
